@@ -10,31 +10,31 @@
 
 ## 简体中文
 
-面向 Windows 的 GitHub Release 附件下载工具。基于 Tauri 2 + Vue 3 + Rust + SQLite，提供项目附件选择、批量下载、托盘、限速、历史检索、收藏和版本检查。v0.2.0 首次公开发布包含当前四页界面重构；当前正式版 v0.2.1 修复保存目录不存在时的处理，支持确认后新建目录。应用界面为简体中文，默认串行下载；本文档提供中英双语说明。
+面向 Windows 的 GitHub Release 附件下载工具。基于 Tauri 2 + Vue 3 + Rust + SQLite，提供项目附件选择、批量下载、托盘、限速、历史检索、收藏和版本检查。v0.2.0 首次公开发布包含当前四页界面重构，v0.2.1 支持确认后创建缺失的保存目录；当前正式版 v0.2.2 修复版本分页时的加载闪烁和布局跳动。应用界面为简体中文，默认串行下载；本文档提供中英双语说明。
 
 顶部三个徽章分别说明 MIT 许可证及 Tauri 2、Vue 3 技术栈，使用无需申请的 [Shields.io 徽章](https://shields.io/badges/static-badge)，不代表安全认证或 Windows 代码签名。
 
 ## 使用
 
-从 [GitHub Releases](https://github.com/lkuliuying/githubsp/releases/latest) 获取新版。v0.2.1 附件：
+从 [GitHub Releases](https://github.com/lkuliuying/githubsp/releases/latest) 获取新版。v0.2.2 附件：
 
 | 文件 | 用途 |
 | --- | --- |
-| [GitHubSP-v0.2.1-windows-x64.exe](https://github.com/lkuliuying/githubsp/releases/download/v0.2.1/GitHubSP-v0.2.1-windows-x64.exe) | Windows x64 免安装程序 |
-| [GitHubSP-v0.2.1-source.zip](https://github.com/lkuliuying/githubsp/releases/download/v0.2.1/GitHubSP-v0.2.1-source.zip) | 对应发布标签的源码，包含 npm/Cargo 锁文件及 LICENSE |
-| [SHA256SUMS.txt](https://github.com/lkuliuying/githubsp/releases/download/v0.2.1/SHA256SUMS.txt) | exe、源码包和 LICENSE 的 SHA-256 校验值 |
-| [LICENSE](https://github.com/lkuliuying/githubsp/releases/download/v0.2.1/LICENSE) | 随分发提供的 MIT 许可证 |
+| [GitHubSP-v0.2.2-windows-x64.exe](https://github.com/lkuliuying/githubsp/releases/download/v0.2.2/GitHubSP-v0.2.2-windows-x64.exe) | Windows x64 免安装程序 |
+| [GitHubSP-v0.2.2-source.zip](https://github.com/lkuliuying/githubsp/releases/download/v0.2.2/GitHubSP-v0.2.2-source.zip) | 对应发布标签的源码，包含 npm/Cargo 锁文件及 LICENSE |
+| [SHA256SUMS.txt](https://github.com/lkuliuying/githubsp/releases/download/v0.2.2/SHA256SUMS.txt) | exe、源码包和 LICENSE 的 SHA-256 校验值 |
+| [LICENSE](https://github.com/lkuliuying/githubsp/releases/download/v0.2.2/LICENSE) | 随分发提供的 MIT 许可证 |
 
 1. 下载 exe 和 `SHA256SUMS.txt`，用下方命令计算摘要，并与校验文件中对应文件名的一行比较；不一致时不要运行。
 2. 若旧版正在运行，先从托盘菜单选择“保存进度并退出”，再双击新版，避免单实例机制激活旧进程。
 3. 粘贴公开 GitHub 附件、仓库或版本链接，输入或选择保存目录并确认下载。手动输入的目录不存在时，提交后会询问是否新建，确认后继续原操作。完成后可打开所在目录；程序不会运行下载的文件。
 
 ```powershell
-Get-FileHash .\GitHubSP-v0.2.1-windows-x64.exe -Algorithm SHA256
+Get-FileHash .\GitHubSP-v0.2.2-windows-x64.exe -Algorithm SHA256
 Get-Content .\SHA256SUMS.txt
 ```
 
-新版沿用原应用标识和数据目录。旧版及 UI 试用产物保留在维护者本地 `artifacts/`；该目录不提交到源码仓库。本次公开发布文件单独保存在 `artifacts/releases/v0.2.1/`。
+新版沿用原应用标识和数据目录。旧版及 UI 试用产物保留在维护者本地 `artifacts/`；该目录不提交到源码仓库。本次公开发布文件单独保存在 `artifacts/releases/v0.2.2/`。
 
 支持 Windows 10/11 x64，需要系统已安装 [WebView2 Runtime](https://v2.tauri.app/reference/webview-versions/)。便携程序不需要安装 GitHubSP，但运行数据仍保存在用户本地应用数据目录。当前构建未进行代码签名。
 
@@ -77,11 +77,11 @@ https://github.com/{owner}/{repo}/releases/tag/{tag}
 - **设置**：限速、窗口行为、收藏检查和软件更新分区。限速输入仍为 KiB/s，0 为不限速；滑块用于 0–100 MiB/s 的快捷调整，更高值通过输入框设置。恢复默认只修改表单，点击保存后才生效；收藏自动检查间隔仍固定为 6 小时。
 - **适配与状态**：窄窗口将主要分区堆叠，宽表格在面板内滚动；保留后端未就绪、加载、空记录、文件不可访问、错误和未经官方摘要验证等状态。浏览器入口仍禁用真实下载和系统目录操作。
 
-参考图中的示例版本、地区线路、延迟、并发设置及自动生成源码包不代表现有产品能力。软件版本为 0.2.1，窗口按钮由 Tauri 原生标题栏提供。历史视觉核对见 [design-qa.md](design-qa.md)，其中截图和日志属于维护者本地验收资料，不随源码分发；隔离浏览器验收只提供前端证据，不等同于 Windows 原生或真实网络下载验收。
+参考图中的示例版本、地区线路、延迟、并发设置及自动生成源码包不代表现有产品能力。软件版本为 0.2.2，窗口按钮由 Tauri 原生标题栏提供。历史视觉核对见 [design-qa.md](design-qa.md)，其中截图和日志属于维护者本地验收资料，不随源码分发；隔离浏览器验收只提供前端证据，不等同于 Windows 原生或真实网络下载验收。
 
 ## GitHubSP 自身更新源
 
-本仓库发布的 v0.2.1 便携程序在构建时配置官方发布源 `lkuliuying/githubsp`。源码自行构建时，若未设置 `GITHUBSP_RELEASE_REPOSITORY`，点击检查仍会显示“尚未配置官方发布源”，不会发送更新请求或声称已是最新版。该变量是公开仓库标识而非密钥，只在编译时读取；`build.rs` 跟踪其变化。构建官方发布配置：
+本仓库发布的 v0.2.2 便携程序在构建时配置官方发布源 `lkuliuying/githubsp`。源码自行构建时，若未设置 `GITHUBSP_RELEASE_REPOSITORY`，点击检查仍会显示“尚未配置官方发布源”，不会发送更新请求或声称已是最新版。该变量是公开仓库标识而非密钥，只在编译时读取；`build.rs` 跟踪其变化。构建官方发布配置：
 
 ```powershell
 $previousReleaseRepository = $env:GITHUBSP_RELEASE_REPOSITORY
@@ -138,7 +138,7 @@ npm run tauri -- dev
 npm run tauri -- build --no-bundle --ci -- --locked
 ```
 
-构建产物为 `src-tauri/target/release/githubsp.exe`，本次分发文件名为 `GitHubSP-v0.2.1-windows-x64.exe`。`--no-bundle` 不生成安装程序。若开发环境强制 npm 离线模式，可对安装命令显式增加 `--offline=false --registry=https://registry.npmjs.org`，无需修改全局配置。
+构建产物为 `src-tauri/target/release/githubsp.exe`，本次分发文件名为 `GitHubSP-v0.2.2-windows-x64.exe`。`--no-bundle` 不生成安装程序。若开发环境强制 npm 离线模式，可对安装命令显式增加 `--offline=false --registry=https://registry.npmjs.org`，无需修改全局配置。
 
 发布构建重新构建前端并锁定 Cargo 依赖，随后核对 PE 架构、版本和 SHA-256；依赖已缓存时可在 Cargo 参数末尾追加 `--offline`。发布源码包从对应 Git 标签导出，不包含依赖目录、缓存、个人任务数据库或测试产物。打包验证不执行安装，也不读取用户任务库。
 
@@ -211,31 +211,31 @@ cargo run --manifest-path src-tauri/Cargo.toml --example verify_v2 -- "https://g
 
 ## English
 
-GitHubSP is a Windows desktop downloader for public GitHub Release assets, built with Tauri 2, Vue 3, Rust, and SQLite. It provides release browsing, asset selection, batch downloads, a system tray, bandwidth limits, searchable history, repository favorites, and update checks. The first public release, v0.2.0, includes the current four-page interface redesign. The current stable release, v0.2.1, fixes missing destination directories by offering to create them after confirmation. The application UI is in Simplified Chinese; this README is bilingual. Downloads run sequentially by default.
+GitHubSP is a Windows desktop downloader for public GitHub Release assets, built with Tauri 2, Vue 3, Rust, and SQLite. It provides release browsing, asset selection, batch downloads, a system tray, bandwidth limits, searchable history, repository favorites, and update checks. The first public release, v0.2.0, introduced the current four-page interface redesign; v0.2.1 added confirmation before creating missing destination directories. The current stable release, v0.2.2, fixes flicker and layout shifts while loading release pages. The application UI is in Simplified Chinese; this README is bilingual. Downloads run sequentially by default.
 
 The three badges identify the MIT license and the Tauri 2 / Vue 3 technology stack. They use [Shields.io static badges](https://shields.io/badges/static-badge), which require no application or approval. They do not certify security or provide Windows code signing.
 
 ## Quick start
 
-Download the current version from [GitHub Releases](https://github.com/lkuliuying/githubsp/releases/latest). Assets for v0.2.1:
+Download the current version from [GitHub Releases](https://github.com/lkuliuying/githubsp/releases/latest). Assets for v0.2.2:
 
 | File | Purpose |
 | --- | --- |
-| [GitHubSP-v0.2.1-windows-x64.exe](https://github.com/lkuliuying/githubsp/releases/download/v0.2.1/GitHubSP-v0.2.1-windows-x64.exe) | Portable Windows x64 application |
-| [GitHubSP-v0.2.1-source.zip](https://github.com/lkuliuying/githubsp/releases/download/v0.2.1/GitHubSP-v0.2.1-source.zip) | Source from the release tag, including npm/Cargo lockfiles and LICENSE |
-| [SHA256SUMS.txt](https://github.com/lkuliuying/githubsp/releases/download/v0.2.1/SHA256SUMS.txt) | SHA-256 checksums for the executable, source archive, and LICENSE |
-| [LICENSE](https://github.com/lkuliuying/githubsp/releases/download/v0.2.1/LICENSE) | MIT license supplied with the distribution |
+| [GitHubSP-v0.2.2-windows-x64.exe](https://github.com/lkuliuying/githubsp/releases/download/v0.2.2/GitHubSP-v0.2.2-windows-x64.exe) | Portable Windows x64 application |
+| [GitHubSP-v0.2.2-source.zip](https://github.com/lkuliuying/githubsp/releases/download/v0.2.2/GitHubSP-v0.2.2-source.zip) | Source from the release tag, including npm/Cargo lockfiles and LICENSE |
+| [SHA256SUMS.txt](https://github.com/lkuliuying/githubsp/releases/download/v0.2.2/SHA256SUMS.txt) | SHA-256 checksums for the executable, source archive, and LICENSE |
+| [LICENSE](https://github.com/lkuliuying/githubsp/releases/download/v0.2.2/LICENSE) | MIT license supplied with the distribution |
 
 1. Download the executable and `SHA256SUMS.txt`. Run the commands below and compare the hash with the line for that filename. Do not run the executable if they differ.
 2. If an older instance is running, select “保存进度并退出” (save progress and exit) from its tray menu before opening the new executable. Otherwise, single-instance handling will activate the older process.
 3. Paste a public GitHub asset, repository, or release URL, enter or choose a destination directory, and confirm the download. If a manually entered directory is missing, submitting asks whether to create it before continuing. You can open the destination directory when it finishes; GitHubSP does not execute downloaded files.
 
 ```powershell
-Get-FileHash .\GitHubSP-v0.2.1-windows-x64.exe -Algorithm SHA256
+Get-FileHash .\GitHubSP-v0.2.2-windows-x64.exe -Algorithm SHA256
 Get-Content .\SHA256SUMS.txt
 ```
 
-The release keeps the existing application identifier and data directory. Older builds and UI trial packages remain in the maintainer's local `artifacts/` directory, which is excluded from Git. Files for this public release are stored separately under `artifacts/releases/v0.2.1/`.
+The release keeps the existing application identifier and data directory. Older builds and UI trial packages remain in the maintainer's local `artifacts/` directory, which is excluded from Git. Files for this public release are stored separately under `artifacts/releases/v0.2.2/`.
 
 Requires Windows 10/11 x64 and an installed [WebView2 Runtime](https://v2.tauri.app/reference/webview-versions/). GitHubSP itself needs no installation, but runtime data is stored in the user's local application data directory. The executable is not code-signed.
 
@@ -278,11 +278,11 @@ The four pages use local `view` state without an additional router or UI depende
 - **Settings:** bandwidth, window behavior, favorite checks, and software updates. Limits remain in KiB/s with 0 for unlimited. The slider covers 0–100 MiB/s; higher limits use numeric entry. Restoring defaults changes the draft only until saved. Automatic favorite checks retain the fixed six-hour interval.
 - **Responsive and error states:** narrow windows stack sections and wide tables scroll inside their panels. Backend-not-ready, loading, empty, inaccessible-file, error, and unverified-digest states remain visible. Browser preview disables real downloads and system-directory operations.
 
-Reference images are not promises of extra versions, regional routes, latency metrics, parallel task settings, or support for generated source archives. The app version is 0.2.1, and window controls are provided by Tauri's native title bar. [design-qa.md](design-qa.md) contains the historical visual review in Chinese. Its screenshots and logs are local maintainer evidence, not distributed source. Isolated browser checks establish frontend behavior, not native Windows or real-network acceptance.
+Reference images are not promises of extra versions, regional routes, latency metrics, parallel task settings, or support for generated source archives. The app version is 0.2.2, and window controls are provided by Tauri's native title bar. [design-qa.md](design-qa.md) contains the historical visual review in Chinese. Its screenshots and logs are local maintainer evidence, not distributed source. Isolated browser checks establish frontend behavior, not native Windows or real-network acceptance.
 
 ## Application update source
 
-The v0.2.1 portable executable published by this repository is built with `GITHUBSP_RELEASE_REPOSITORY=lkuliuying/githubsp`. For a source build without that variable, checking updates reports that no official source is configured, sends no update request, and does not claim the app is current. The value is a public repository identifier, not a secret. It is read at compile time, and `build.rs` tracks changes. To build with the official release source:
+The v0.2.2 portable executable published by this repository is built with `GITHUBSP_RELEASE_REPOSITORY=lkuliuying/githubsp`. For a source build without that variable, checking updates reports that no official source is configured, sends no update request, and does not claim the app is current. The value is a public repository identifier, not a secret. It is read at compile time, and `build.rs` tracks changes. To build with the official release source:
 
 ```powershell
 $previousReleaseRepository = $env:GITHUBSP_RELEASE_REPOSITORY
@@ -339,7 +339,7 @@ npm run tauri -- dev
 npm run tauri -- build --no-bundle --ci -- --locked
 ```
 
-The output is `src-tauri/target/release/githubsp.exe`, distributed for this version as `GitHubSP-v0.2.1-windows-x64.exe`. `--no-bundle` does not create an installer. If your environment forces npm offline, add `--offline=false --registry=https://registry.npmjs.org` to the dependency-install command without changing global configuration.
+The output is `src-tauri/target/release/githubsp.exe`, distributed for this version as `GitHubSP-v0.2.2-windows-x64.exe`. `--no-bundle` does not create an installer. If your environment forces npm offline, add `--offline=false --registry=https://registry.npmjs.org` to the dependency-install command without changing global configuration.
 
 Release builds rebuild the frontend and retain locked Cargo dependencies, then check PE architecture, version, and SHA-256. When dependencies are cached, append `--offline` to the Cargo arguments. Release source archives are exported from the matching Git tag, excluding dependencies, caches, personal databases, and test artifacts. Packaging checks neither install the app nor access the user's task database.
 
