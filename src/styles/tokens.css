@@ -1,0 +1,39 @@
+:root {
+  font-family: "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", sans-serif;
+  color: #172747;
+  background: #f2f7fc;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  --text: #172747;
+  --muted: #7183a1;
+  --surface: #ffffff;
+  --surface-subtle: #f5f8fc;
+  --border: #e2eaf3;
+  --border-strong: #cbd8e7;
+  --green: #069c58;
+  --green-hover: #07814b;
+  --green-soft: #e8f8f0;
+  --green-border: #c9eddd;
+  --blue: #197de5;
+  --blue-soft: #edf6ff;
+  --amber: #b87400;
+  --amber-soft: #fff7e6;
+  --red: #e14860;
+  --red-soft: #fff0f3;
+  --radius: 12px;
+  --shadow: 0 3px 12px #243e6410;
+}
+* { box-sizing: border-box; }
+body { margin: 0; min-width: 360px; }
+button, input, select, textarea { font: inherit; }
+button, summary { -webkit-tap-highlight-color: transparent; }
+button { cursor: pointer; }
+button:disabled { cursor: not-allowed; }
+button svg { flex-shrink: 0; }
+input[type='checkbox'] { accent-color: var(--green); width: 16px; height: 16px; flex-shrink: 0; }
+:focus-visible { outline: 3px solid #14895880; outline-offset: 3px; }
+::selection { background: #cceedd; color: var(--text); }
+::-webkit-scrollbar { width: 7px; height: 7px; }
+::-webkit-scrollbar-thumb { background: #c9d5e4; border-radius: 8px; }
+::-webkit-scrollbar-track { background: var(--surface-subtle); }
