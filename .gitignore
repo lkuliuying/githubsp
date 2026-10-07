@@ -1,0 +1,8 @@
+node_modules/
+dist/
+.cache/
+src-tauri/target/
+src-tauri/gen/
+artifacts/
+test-results/
+*.log

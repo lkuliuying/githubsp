@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "main",
+  "description": "主窗口仅允许事件订阅和本地目录选择。",
+  "windows": ["main"],
+  "permissions": ["core:default", "dialog:allow-open"]
+}
