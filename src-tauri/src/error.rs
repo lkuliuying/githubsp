@@ -20,6 +20,8 @@ pub struct DownloadError {
     pub kind: ErrorKind,
     pub message: String,
     pub retry_after: Option<Duration>,
+    pub recoverable: bool,
+    pub route_failures: Vec<crate::model::RouteFailure>,
 }
 
 pub type Result<T> = std::result::Result<T, DownloadError>;
@@ -52,6 +54,8 @@ impl DownloadError {
             kind,
             message: message.into(),
             retry_after: None,
+            recoverable: false,
+            route_failures: Vec::new(),
         }
     }
 
@@ -101,6 +105,11 @@ impl From<reqwest::Error> for DownloadError {
             "网络传输中断或服务响应无效"
         };
         // 不保留 reqwest 的完整 URL，防止重定向签名进入错误记录。
-        Self::new(ErrorKind::Network, message)
+        let kind = if error.is_redirect() || error.is_builder() {
+            ErrorKind::Protocol
+        } else {
+            ErrorKind::Network
+        };
+        Self::new(kind, message)
     }
 }

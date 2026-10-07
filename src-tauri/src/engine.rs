@@ -1,7 +1,10 @@
 use crate::{
     error::{DownloadError, ErrorKind, Result},
     files::Workspace,
-    model::{Checkpoint, DownloadedFile, EngineUpdate, Part, StoredTask, TaskStatus},
+    model::{
+        Checkpoint, DownloadedFile, EngineUpdate, Part, RetryInfo, RouteFailure, StoredTask,
+        TaskStatus,
+    },
     network::{self, Network, Probe},
     source::parse_release_url,
 };
@@ -9,6 +12,7 @@ use futures_util::future::join_all;
 use reqwest::{header, StatusCode};
 use sha2::{Digest, Sha256};
 use std::{
+    collections::HashMap,
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -60,6 +64,39 @@ pub struct Engine {
     pub(crate) limiter: Arc<crate::limiter::RateLimiter>,
 }
 
+#[derive(Default)]
+pub(crate) struct RunOptions {
+    pub first_route: Option<String>,
+    pub cooldowns: HashMap<String, Instant>,
+}
+
+async fn report_cooldown(
+    route: &network::Route,
+    error: &DownloadError,
+    reporter: &Reporter,
+) -> Result<()> {
+    if let Some(wait) = error.retry_after {
+        // 极端等待值也不能溢出单调时钟；无法表达时保守冷却一年。
+        let now = Instant::now();
+        let deadline = now
+            .checked_add(wait)
+            .unwrap_or(now + Duration::from_secs(365 * 86400));
+        reporter
+            .emit(EngineUpdate::Cooldown(route.id.clone(), deadline))
+            .await?;
+    }
+    Ok(())
+}
+
+fn route_failure(route: &network::Route, error: &DownloadError) -> RouteFailure {
+    RouteFailure {
+        route_id: route.id.clone(),
+        route_name: route.name.clone(),
+        message: error.message.clone(),
+        temporary: error.retryable(),
+    }
+}
+
 impl Engine {
     pub fn production() -> Result<Self> {
         Ok(Self {
@@ -73,6 +110,17 @@ impl Engine {
         record: StoredTask,
         token: CancellationToken,
         reporter: Reporter,
+    ) -> Result<DownloadedFile> {
+        self.run_with(record, token, reporter, RunOptions::default())
+            .await
+    }
+
+    pub(crate) async fn run_with(
+        &self,
+        record: StoredTask,
+        token: CancellationToken,
+        reporter: Reporter,
+        options: RunOptions,
     ) -> Result<DownloadedFile> {
         let source = parse_release_url(&record.task.url)?;
         let workspace = Workspace::new(&record.task.directory, &record.task.id)?;
@@ -135,15 +183,27 @@ impl Engine {
             })
             .cloned()
             .collect();
-        let probes = join_all(routes.iter().cloned().map(|route| {
+        let probes = join_all(routes.iter().map(|route| async {
+            if let Some(deadline) = options
+                .cooldowns
+                .get(&route.id)
+                .filter(|deadline| **deadline > Instant::now())
+            {
+                let mut error =
+                    DownloadError::new(ErrorKind::Network, "服务端要求稍后重试，线路正在冷却");
+                error.retry_after = Some(deadline.saturating_duration_since(Instant::now()));
+                return Err(error);
+            }
             self.network
-                .probe(route, &source, metadata.as_ref(), &token)
+                .probe(route.clone(), &source, metadata.as_ref(), &token)
+                .await
         }))
         .await;
         if token.is_cancelled() {
             return Err(DownloadError::cancelled());
         }
         let mut errors = Vec::new();
+        let mut failures = Vec::new();
         let mut last_kind = ErrorKind::Network;
         let mut candidates = Vec::new();
         let reports = routes
@@ -156,6 +216,8 @@ impl Engine {
             match result {
                 Ok(probe) => candidates.push(probe),
                 Err(error) => {
+                    report_cooldown(route, &error, &reporter).await?;
+                    failures.push(route_failure(route, &error));
                     last_kind = error.kind;
                     errors.push(format!("{}：{}", route.name, error.message));
                 }
@@ -164,6 +226,9 @@ impl Engine {
         candidates.sort_by(|left, right| right.throughput().total_cmp(&left.throughput()));
         let expected = metadata.as_ref().and_then(|value| value.sha256.clone());
         let mut previous = record.checkpoint;
+        let mut last_route = previous
+            .as_ref()
+            .map(|checkpoint| checkpoint.route_id.clone());
         if let Some(checkpoint) = &previous {
             if let Some(index) = candidates
                 .iter()
@@ -173,6 +238,14 @@ impl Engine {
                 let candidate = candidates.remove(index);
                 candidates.insert(0, candidate);
             }
+        }
+        if let Some(index) = options
+            .first_route
+            .as_ref()
+            .and_then(|id| candidates.iter().position(|probe| &probe.route.id == id))
+        {
+            let candidate = candidates.remove(index);
+            candidates.insert(0, candidate);
         }
         for probe in candidates {
             if token.is_cancelled() {
@@ -210,6 +283,15 @@ impl Engine {
             reporter
                 .emit(EngineUpdate::Checkpoint(shared.lock().await.clone()))
                 .await?;
+            let switching = last_route.as_ref().is_some_and(|id| *id != probe.route.id);
+            reporter
+                .emit(EngineUpdate::SelectedRoute(
+                    probe.route.id.clone(),
+                    probe.throughput(),
+                    switching,
+                ))
+                .await?;
+            last_route = Some(probe.route.id.clone());
             for attempt in 0..3 {
                 reporter
                     .emit(EngineUpdate::Status(
@@ -258,6 +340,7 @@ impl Engine {
                         match result {
                             Ok(file) => return Ok(file),
                             Err(error) if error.kind == ErrorKind::Integrity => {
+                                failures.push(route_failure(&probe.route, &error));
                                 last_kind = error.kind;
                                 errors.push(format!("{}：{}", probe.route.name, error));
                                 break;
@@ -278,6 +361,7 @@ impl Engine {
                         return Err(error)
                     }
                     Err(error) => {
+                        report_cooldown(&probe.route, &error, &reporter).await?;
                         if last_kind != ErrorKind::Integrity {
                             last_kind = error.kind;
                         }
@@ -287,6 +371,7 @@ impl Engine {
                                 .retry_after
                                 .is_some_and(|duration| duration > Duration::from_secs(30))
                         {
+                            failures.push(route_failure(&probe.route, &error));
                             errors.push(format!("{}：{}", probe.route.name, error));
                             break;
                         }
@@ -299,6 +384,30 @@ impl Engine {
                         let wait = error
                             .retry_after
                             .unwrap_or(self.network.retry_delay * (1 << attempt));
+                        let preserves_progress = {
+                            let checkpoint = shared.lock().await;
+                            can_resume(&checkpoint, &probe, expected.as_deref())
+                        };
+                        reporter
+                            .emit(EngineUpdate::Retry(
+                                RetryInfo {
+                                    phase: "retrying".into(),
+                                    attempt: attempt + 2,
+                                    max_attempts: 3,
+                                    reason: format!(
+                                        "{}；{}",
+                                        error.message,
+                                        if preserves_progress {
+                                            "将尝试保留进度续传"
+                                        } else {
+                                            "当前线路不满足续传条件，将重新下载"
+                                        }
+                                    ),
+                                    retry_in_ms: crate::route_policy::millis(wait),
+                                },
+                                wait,
+                            ))
+                            .await?;
                         tokio::select! { _ = token.cancelled() => return Err(DownloadError::cancelled()), _ = tokio::time::sleep(wait) => () }
                         let current = shared.lock().await.clone();
                         if !can_resume(&current, &probe, expected.as_deref()) {
@@ -312,8 +421,14 @@ impl Engine {
                 }
             }
         }
-        Err(DownloadError::new(
-            last_kind,
+        let recoverable =
+            last_kind != ErrorKind::Integrity && failures.iter().any(|failure| failure.temporary);
+        let mut error = DownloadError::new(
+            if recoverable {
+                ErrorKind::Network
+            } else {
+                last_kind
+            },
             format!(
                 "{}。{}",
                 if record.task.details.preferred_route.is_some() {
@@ -323,7 +438,10 @@ impl Engine {
                 },
                 errors.join("；")
             ),
-        ))
+        );
+        error.recoverable = recoverable;
+        error.route_failures = failures;
+        Err(error)
     }
 }
 
@@ -517,6 +635,7 @@ impl Transfer {
         }
         let html_type = network::is_html_type(&response);
         let mut first = true;
+        let mut announced_data = false;
         let mut last_commit = Instant::now();
         let outcome = loop {
             let chunk = tokio::select! {
@@ -547,6 +666,12 @@ impl Transfer {
             }
             if let Err(error) = file.write_all(&chunk).await {
                 break Err(error.into());
+            }
+            if !announced_data && !chunk.is_empty() {
+                if let Err(error) = self.reporter.emit(EngineUpdate::DataReceived).await {
+                    break Err(error);
+                }
+                announced_data = true;
             }
             hasher.update(&chunk);
             part.downloaded += chunk.len() as u64;

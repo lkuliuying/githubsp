@@ -64,6 +64,28 @@ async fn change_route(
         .map_err(|e| e.to_string())
 }
 #[tauri::command]
+async fn apply_route_suggestion(
+    id: String,
+    suggestion_id: String,
+    manager: State<'_, Manager>,
+) -> std::result::Result<Snapshot, String> {
+    manager
+        .apply_route_suggestion(id, suggestion_id)
+        .await
+        .map_err(|error| error.to_string())
+}
+#[tauri::command]
+async fn dismiss_route_suggestion(
+    id: String,
+    suggestion_id: String,
+    manager: State<'_, Manager>,
+) -> std::result::Result<Snapshot, String> {
+    manager
+        .dismiss_route_suggestion(id, suggestion_id)
+        .await
+        .map_err(|error| error.to_string())
+}
+#[tauri::command]
 async fn diagnose_routes(
     url: String,
     manager: State<'_, Manager>,
@@ -278,6 +300,7 @@ pub fn run() {
         }))
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
+            crate::completion::start(app.handle());
             crate::desktop::install(app.handle())?;
             let initialize = || -> std::result::Result<Manager, Box<dyn std::error::Error>> {
                 let directory = app.path().app_local_data_dir()?;
@@ -285,7 +308,7 @@ pub fn run() {
                 let handle = app.handle().clone();
                 let emit = Arc::new(move |snapshot: Snapshot| {
                     crate::desktop::update(&handle, &snapshot);
-                    if let Err(error) = handle.emit("downloads-changed", snapshot) {
+                    if let Err(error) = handle.emit_to("main", "downloads-changed", snapshot) {
                         eprintln!("界面事件发送失败：{error}");
                     }
                 });
@@ -323,33 +346,77 @@ pub fn run() {
             }
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![
-            list_tasks,
-            inspect_directory,
-            create_directory,
-            create_task,
-            task_action,
-            open_directory,
-            browse_releases,
-            preview_batch,
-            create_batch,
-            change_route,
-            diagnose_routes,
-            save_settings,
-            reorder_queue,
-            query_history,
-            acknowledge_notices,
-            hide_to_tray,
-            add_favorite,
-            remove_favorite,
-            check_favorites,
-            check_app_update,
-            open_release
-        ])
+        .invoke_handler(|invoke| {
+            if !crate::completion::allowed_command(
+                invoke.message.webview_ref().label(),
+                invoke.message.command(),
+            ) {
+                invoke.resolver.reject("当前窗口无权执行此操作");
+                return true;
+            }
+            let handler: fn(tauri::ipc::Invoke<tauri::Wry>) -> bool = tauri::generate_handler![
+                crate::completion::read_download_notice,
+                crate::completion::present_download_notice,
+                crate::completion::dismiss_download_notice,
+                crate::completion::hover_download_notice,
+                crate::completion::open_download_notice,
+                list_tasks,
+                inspect_directory,
+                create_directory,
+                create_task,
+                task_action,
+                open_directory,
+                browse_releases,
+                preview_batch,
+                create_batch,
+                change_route,
+                apply_route_suggestion,
+                dismiss_route_suggestion,
+                diagnose_routes,
+                save_settings,
+                reorder_queue,
+                query_history,
+                acknowledge_notices,
+                hide_to_tray,
+                add_favorite,
+                remove_favorite,
+                check_favorites,
+                check_app_update,
+                open_release
+            ];
+            handler(invoke)
+        })
         .on_window_event(|window, event| {
+            let app = window.app_handle();
+            if let tauri::WindowEvent::Focused(focused) = event {
+                if let Some(host) = app.try_state::<crate::completion::CompletionHost>() {
+                    let result = if window.label() == "main" && *focused {
+                        host.dismiss(None)
+                    } else if window.label() == crate::completion::WINDOW {
+                        host.focus(*focused)
+                    } else {
+                        Ok(())
+                    };
+                    if let Err(error) = result {
+                        eprintln!("桌面提醒焦点更新失败：{error}");
+                    }
+                }
+            }
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                if window.label() == crate::completion::WINDOW {
+                    api.prevent_close();
+                    if let Err(error) = app
+                        .state::<crate::completion::CompletionHost>()
+                        .dismiss(None)
+                    {
+                        eprintln!("桌面提醒关闭失败：{error}");
+                    }
+                    return;
+                }
+                if window.label() != "main" {
+                    return;
+                }
                 api.prevent_close();
-                let app = window.app_handle();
                 if app
                     .state::<crate::desktop::DesktopState>()
                     .close_to_tray

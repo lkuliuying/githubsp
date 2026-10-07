@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onUnmounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { PhCloudArrowDown, PhDownloadSimple, PhClockCounterClockwise, PhStar, PhGearSix, PhTray, PhCheckCircle, PhX, PhWarningCircle, PhPlus, PhLink, PhFolderOpen, PhQueue, PhPlay, PhPause, PhTrash } from '@phosphor-icons/vue'
 import TaskRow from './components/TaskRow.vue'
 import SourcePicker from './components/SourcePicker.vue'
@@ -10,11 +10,22 @@ import FavoritesView from './components/FavoritesView.vue'
 import UpdateView from './components/UpdateView.vue'
 import { useDownloads } from './composables/useDownloads'
 import { downloadsApi, errorMessage } from './services/downloads'
+import { noticeApi } from './services/notices'
 import type { TaskAction, DownloadTask } from './types'
 
 const { snapshot, available, loading, error, pending, create, act, openDirectory, refresh, apply, perform } = useDownloads()
 const picker = ref<InstanceType<typeof SourcePicker>>()
 const view = ref<'downloads' | 'history' | 'favorites' | 'settings'>('downloads')
+let stopNoticeNavigation: (() => void) | undefined
+onMounted(async () => {
+  if (!noticeApi.available()) return
+  try {
+    const stop = await noticeApi.subscribeNavigation(() => { if (!disposed) view.value = 'downloads' })
+    if (disposed) stop()
+    else stopNoticeNavigation = stop
+  } catch (cause) { if (!disposed) error.value = errorMessage(cause) }
+})
+onUnmounted(() => stopNoticeNavigation?.())
 const navigation = [
   { id: 'downloads', label: '下载', icon: PhDownloadSimple },
   { id: 'history', label: '历史', icon: PhClockCounterClockwise },
@@ -44,7 +55,7 @@ const activeStates = ['probing', 'downloading', 'retrying', 'verifying', 'pausin
 const activeCount = computed(() => snapshot.value.tasks.filter(task => activeStates.includes(task.status)).length)
 const completedCount = computed(() => snapshot.value.tasks.filter(task => task.status === 'completed').length)
 const resumable = computed(() => snapshot.value.tasks.filter(task => ['paused', 'failed'].includes(task.status)))
-const pausable = computed(() => snapshot.value.tasks.filter(task => ['queued', 'probing', 'downloading', 'retrying', 'verifying'].includes(task.status)))
+const pausable = computed(() => snapshot.value.tasks.filter(task => ['queued', 'waiting_network', 'probing', 'downloading', 'retrying', 'verifying'].includes(task.status)))
 const ready = computed(() => available && !loading.value && !snapshot.value.error && snapshot.value.revision >= 0)
 const directoryBusy = computed(() => selecting.value || submitting.value || preparingDirectory.value || pending.value.has('create'))
 const canCreate = computed(() => ready.value && !!url.value.trim() && !!directory.value.trim() && !directoryBusy.value)
@@ -159,7 +170,7 @@ async function requestAction(id: string, action: TaskAction) {
 async function runBatch(action: 'pause' | 'resume' | 'remove') {
   if (batchAction.value || !ready.value) return
   batchAction.value = true
-  const statuses = action === 'pause' ? ['queued', 'probing', 'downloading', 'retrying', 'verifying'] : action === 'resume' ? ['paused', 'failed'] : ['completed']
+  const statuses = action === 'pause' ? ['queued', 'waiting_network', 'probing', 'downloading', 'retrying', 'verifying'] : action === 'resume' ? ['paused', 'failed'] : ['completed']
   const ids = snapshot.value.tasks.filter(task => statuses.includes(task.status)).map(task => task.id)
   try {
     for (const id of ids) {
@@ -210,11 +221,11 @@ async function confirmAction() {
         </section>
         <div class="app-workbench">
           <SourcePicker ref="picker" :directory="directory" :ready="ready" :prepare-directory="prepareDirectory" :directory-busy="directoryBusy" @snapshot="apply" @resume="id => act(id, 'resume')" @favorite="favorite" />
-          <RouteDiagnostics :reports="snapshot.diagnostics" :diagnosing="snapshot.diagnosing || pending.has('diagnose')" :ready="ready" :has-active="activeCount > 0" :url="url" @diagnose="diagnose" />
+          <RouteDiagnostics :reports="snapshot.diagnostics" :context="snapshot.diagnosticContext" :diagnosing="snapshot.diagnosing || pending.has('diagnose')" :ready="ready" :has-active="activeCount > 0" :url="url" @diagnose="diagnose" />
         </div>
         <section class="pa-panel app-queue" aria-labelledby="queue-title" :aria-busy="loading">
           <div class="section-heading app-queue__heading">
-            <span class="section-heading__icon"><PhQueue :size="23" /></span><div class="section-heading__body"><h2 id="queue-title">下载队列</h2><p>{{ snapshot.tasks.length }} 个任务 · {{ activeCount }} 个传输中 · {{ queued.length }} 个等待中</p></div>
+            <span class="section-heading__icon"><PhQueue :size="23" /></span><div class="section-heading__body"><h2 id="queue-title">下载队列</h2><p>{{ snapshot.tasks.length }} 个任务 · {{ activeCount }} 个传输中 · {{ queued.length }} 个排队中 · {{ snapshot.tasks.filter(task => task.status === 'waiting_network').length }} 个等待线路恢复</p></div>
             <div class="app-queue__toolbar">
               <button class="pa-btn" :disabled="!ready || batchAction || !resumable.length" @click="runBatch('resume')"><PhPlay :size="16" weight="fill" />全部继续</button>
               <button class="pa-btn" :disabled="!ready || batchAction || !pausable.length" @click="runBatch('pause')"><PhPause :size="16" weight="fill" />全部暂停</button>
@@ -225,9 +236,9 @@ async function confirmAction() {
           <div v-else-if="available && snapshot.revision < 0" class="pa-empty"><PhWarningCircle :size="36" /><h3>任务管理器暂未就绪</h3><button class="pa-btn" @click="refresh">重新连接</button></div>
           <div v-else class="pa-table-scroll" tabindex="0" aria-label="下载队列表格">
             <table class="pa-table app-task-table">
-              <thead><tr><th scope="col">#</th><th scope="col">文件名</th><th scope="col">大小</th><th scope="col">进度</th><th scope="col">速度</th><th scope="col">剩余时间</th><th scope="col">线路</th><th scope="col">校验</th><th scope="col">状态</th><th scope="col">操作</th></tr></thead>
+              <thead><tr><th scope="col">#</th><th scope="col">文件名</th><th scope="col">大小</th><th scope="col">进度</th><th scope="col">速度</th><th scope="col">剩余时间</th><th scope="col">线路</th><th scope="col">状态</th><th scope="col">操作</th></tr></thead>
               <TaskRow v-for="(task, index) in snapshot.tasks" :key="task.id" :task="task" :index="index + 1" :busy="pending.has(task.id) || !ready || batchAction" :order-busy="pending.has('order')" :first="queued[0]?.id === task.id" :last="queued.at(-1)?.id === task.id" @action="requestAction" @open="openDirectory" @snapshot="apply" @redownload="redownload" @favorite="favorite" @move="move" />
-              <tbody v-if="!snapshot.tasks.length"><tr><td colspan="10"><div class="pa-empty"><PhCloudArrowDown :size="42" weight="light" /><h3>准备好你的第一个下载</h3><p>粘贴附件链接，选择保存位置，即可开始。</p></div></td></tr></tbody>
+              <tbody v-if="!snapshot.tasks.length"><tr><td colspan="9"><div class="pa-empty"><PhCloudArrowDown :size="42" weight="light" /><h3>准备好你的第一个下载</h3><p>粘贴附件链接，选择保存位置，即可开始。</p></div></td></tr></tbody>
             </table>
           </div>
         </section>
@@ -282,11 +293,12 @@ main { flex: 1; min-width: 0; padding: 14px 20px 22px; }
 .app-submit { padding: 10px 22px; }
 .app-workbench { display: grid; grid-template-columns: minmax(0, 1.7fr) minmax(340px, 1fr); gap: 16px; align-items: stretch; }
 .app-queue { padding: 16px; }
+.app-queue .pa-table-scroll { container-type: inline-size; }
 .app-queue__heading .section-heading__body { display: flex; align-items: baseline; gap: 14px; }
 .app-queue__heading p { margin: 0; }
 .app-queue__toolbar { display: flex; gap: 8px; flex-wrap: wrap; }
 .app-queue__toolbar .pa-btn { min-height: 36px; font-size: 12px; }
-.app-task-table { min-width: 1080px; }.app-task-table th { padding-top: 8px; padding-bottom: 8px; }.app-queue__heading { margin-bottom: 12px; }
+.app-task-table { min-width: 990px; }.app-task-table th { padding-top: 8px; padding-bottom: 8px; }.app-queue__heading { margin-bottom: 12px; }
 .app-footer { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px 20px; min-height: 43px; padding: 10px 26px; color: #7185a3; border-top: 1px solid var(--border); font-size: 11px; background: #f8fbfe; }
 .app-footer > span { display: flex; align-items: center; gap: 8px; }
 .app-footer strong { font-weight: 400; }.app-footer i { height: 12px; border-left: 1px solid var(--border-strong); margin: 0 4px; }

@@ -9,7 +9,7 @@ import { downloadsApi } from './services/downloads'
 import type { CatalogPage, Snapshot, PrepareDirectory } from './types'
 
 vi.mock('./services/downloads', () => ({ downloadsApi: { browse: vi.fn(), previewBatch: vi.fn(), createBatch: vi.fn(), saveSettings: vi.fn(), history: vi.fn(), act: vi.fn(), copy: vi.fn(), openDirectory: vi.fn(), favorite: vi.fn(), checkFavorites: vi.fn(), removeFavorite: vi.fn(), checkUpdate: vi.fn(), openRelease: vi.fn() }, errorMessage: (value: unknown) => String(value) }))
-const snapshot: Snapshot = { tasks: [], lastDirectory: 'F:\\下载', error: null, revision: 1, queueRevision: 0, settings: { limitKib: 0, closeToTray: false, autoCheck: false }, diagnostics: [], diagnosing: false, notices: [], favorites: [] }
+const snapshot: Snapshot = { tasks: [], lastDirectory: 'F:\\下载', error: null, revision: 1, queueRevision: 0, settings: { limitKib: 0, closeToTray: false, autoCheck: false, backgroundCompletionNotice: true }, diagnostics: [], diagnosing: false, notices: [], favorites: [] }
 const url = 'https://github.com/test/repo/releases/download/v1/file.exe'
 const catalog: CatalogPage = { repository: 'test/repo', page: 0, hasMore: false, selectedUrl: null, releases: [{ id: 1, tag: 'v1', name: 'v1', prerelease: false, notes: '', url: 'https://github.com/test/repo/releases/tag/v1', assets: [{ id: 2, name: '中文安装包-x64.exe', url, size: 1024, sha256: 'a'.repeat(64), hints: ['Windows', 'x64'] }] }] }
 const wrappers: ReturnType<typeof mount>[] = []
@@ -26,7 +26,12 @@ describe('三批功能用户流程', () => {
     vi.mocked(downloadsApi.createBatch).mockResolvedValue({ items: [{ input: url, url: null, filename: null, size: null, status: 'failed', message: '目录不可写', taskId: null }], snapshot })
     const wrapper = render(SourcePicker, { directory: 'F:\\下载', ready: true })
     await wrapper.get('#project-source').setValue('https://github.com/test/repo'); await click(wrapper, '查找版本')
-    expect(wrapper.text()).toContain('Windows · x64'); await wrapper.get('.asset input').setValue(true); await click(wrapper, '预览所选')
+    expect(wrapper.text()).toContain('Windows · x64')
+    expect(wrapper.get('.asset').text()).toContain('1.0 KB')
+    expect(wrapper.get('.asset').text()).not.toMatch(/SHA-256|摘要/)
+    await wrapper.get('.asset input').setValue(true); await click(wrapper, '预览所选')
+    expect(wrapper.text()).toContain('已知总大小 1.0 KB')
+    expect(wrapper.text()).toContain('可用空间 10.0 KB')
     expect(downloadsApi.createBatch).not.toHaveBeenCalled(); expect(wrapper.text()).toContain('有效 1 项')
     await click(wrapper, '确认创建'); expect(downloadsApi.createBatch).toHaveBeenCalledWith([url], 'F:\\下载', null)
     expect((wrapper.get('#project-source').element as HTMLTextAreaElement).value).toBe(url); expect(wrapper.text()).toContain('目录不可写')
@@ -58,17 +63,26 @@ describe('三批功能用户流程', () => {
     expect(downloadsApi.createBatch).not.toHaveBeenCalled()
   })
   it('限速拒绝非法值，保存完整设置并显示成功', async () => {
-    vi.mocked(downloadsApi.saveSettings).mockResolvedValue(snapshot)
+    vi.mocked(downloadsApi.saveSettings).mockResolvedValue({ ...snapshot, settings: { ...snapshot.settings, limitKib: 5000, closeToTray: true } })
     const wrapper = render(SettingsView, { settings: snapshot.settings, ready: true })
     await wrapper.get('#rate-limit').setValue('-1'); await wrapper.get('form').trigger('submit'); expect(downloadsApi.saveSettings).not.toHaveBeenCalled()
-    await wrapper.get('#rate-limit').setValue('512'); await wrapper.findAll('input[type="checkbox"]')[0]!.setValue(true); await wrapper.get('form').trigger('submit'); await flushPromises()
-    expect(downloadsApi.saveSettings).toHaveBeenCalledWith({ limitKib: 512, closeToTray: true, autoCheck: false }); expect(wrapper.text()).toContain('设置已保存')
+    await wrapper.get('#rate-limit').setValue('5.12'); await wrapper.findAll('input[type="checkbox"]')[0]!.setValue(true); await wrapper.get('form').trigger('submit'); await flushPromises()
+    expect(downloadsApi.saveSettings).toHaveBeenCalledWith({ limitKib: 5000, closeToTray: true, autoCheck: false, backgroundCompletionNotice: true }); expect(wrapper.text()).toContain('设置已保存')
   })
   it('下载进度快照不会覆盖尚未保存的限速输入', async () => {
     const wrapper = mount(SettingsView, { props: { settings: { ...snapshot.settings }, ready: true } }); wrappers.push(wrapper)
     await wrapper.get('#rate-limit').setValue('512')
     await wrapper.setProps({ settings: { ...snapshot.settings } })
     expect((wrapper.get('#rate-limit').element as HTMLInputElement).value).toBe('512')
+  })
+  it('后台完成提醒默认开启，关闭后保存完整设置', async () => {
+    vi.mocked(downloadsApi.saveSettings).mockResolvedValue({ ...snapshot, settings: { ...snapshot.settings, backgroundCompletionNotice: false } })
+    const wrapper = render(SettingsView, { settings: snapshot.settings, ready: true })
+    const option = wrapper.findAll('label').find(label => label.text().includes('后台下载完成提醒'))!
+    expect((option.get('input').element as HTMLInputElement).checked).toBe(true)
+    await option.get('input').setValue(false)
+    await wrapper.get('form').trigger('submit'); await flushPromises()
+    expect(downloadsApi.saveSettings).toHaveBeenCalledWith({ ...snapshot.settings, backgroundCompletionNotice: false })
   })
   it('历史文件缺失显示位置和未知完成时间，移除只调用记录操作', async () => {
     const task = { id: 'x', url, filename: 'file.exe', directory: 'F:\\下载', status: 'completed' as const, downloaded: 1, total: 1, speed: 0, eta: null, route: null, verification: 'unverified' as const, error: null, finalPath: 'F:\\下载\\file.exe', createdAt: 1, revision: 1 }

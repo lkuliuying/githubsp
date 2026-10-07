@@ -10,6 +10,7 @@ use crate::{
 };
 use sha2::{Digest, Sha256};
 use std::{
+    collections::HashMap,
     path::Path,
     sync::{Arc, Mutex},
     time::Duration,
@@ -21,6 +22,186 @@ use tokio::{
 use tokio_util::sync::CancellationToken;
 
 const SOURCE: &str = "https://github.com/test/repo/releases/download/v1/file.bin";
+
+#[path = "diagnostics_tests.rs"]
+mod diagnostics_tests;
+
+#[tokio::test]
+async fn elapsed_time_survives_pause_restart_resume_and_freezes_after_completion() {
+    let fixture = Fixture::new(Mode::Slow, 1024 * 1024).await;
+    let root = tempfile::tempdir().unwrap();
+    let db = root.path().join("elapsed.sqlite3");
+    let manager = Manager::start(&db, fixture.engine(), Arc::new(|_| {})).unwrap();
+    let created = manager
+        .create(SOURCE.into(), root.path().into())
+        .await
+        .unwrap();
+    let first = created.tasks[0].id.clone();
+    assert_eq!(created.tasks[0].details.elapsed_ms, Some(0));
+    wait_for(&manager, |s| s.tasks[0].status == TaskStatus::Downloading).await;
+    let queued = manager
+        .create(SOURCE.replace("file.bin", "queued.bin"), root.path().into())
+        .await
+        .unwrap();
+    let second = queued.tasks[1].id.clone();
+    assert_eq!(queued.tasks[1].details.elapsed_ms, Some(0));
+    manager.action(second.clone(), Action::Pause).await.unwrap();
+    manager.action(first.clone(), Action::Pause).await.unwrap();
+    let paused = wait_for(&manager, |s| s.tasks[0].status == TaskStatus::Paused).await;
+    let elapsed = paused.tasks[0].details.elapsed_ms.unwrap();
+    assert!(elapsed > 0);
+    tokio::time::sleep(Duration::from_millis(80)).await;
+    let still_paused = manager.snapshot().await.unwrap();
+    assert_eq!(still_paused.tasks[0].details.elapsed_ms, Some(elapsed));
+    assert_eq!(still_paused.tasks[1].details.elapsed_ms, Some(0));
+    manager.shutdown().await.unwrap();
+    let restarted = Manager::start(&db, fixture.engine(), Arc::new(|_| {})).unwrap();
+    let saved = restarted.snapshot().await.unwrap();
+    assert_eq!(saved.tasks[0].details.elapsed_ms, Some(elapsed));
+    assert!(!saved.tasks[0].details.elapsed_is_partial);
+    assert!(saved.notices.is_empty());
+    restarted
+        .action(first.clone(), Action::Resume)
+        .await
+        .unwrap();
+    let done = wait_for(&restarted, |s| s.tasks[0].status == TaskStatus::Completed).await;
+    let total = done.tasks[0].details.elapsed_ms.unwrap();
+    assert!(total > elapsed);
+    assert_eq!(
+        done.notices[0].kind,
+        crate::model::NoticeKind::DownloadCompleted
+    );
+    assert_eq!(done.notices[0].task_id.as_deref(), Some(first.as_str()));
+    tokio::time::sleep(Duration::from_millis(80)).await;
+    assert_eq!(
+        restarted.snapshot().await.unwrap().tasks[0]
+            .details
+            .elapsed_ms,
+        Some(total)
+    );
+    let again = restarted
+        .create(SOURCE.into(), root.path().into())
+        .await
+        .unwrap();
+    assert_eq!(again.tasks[2].details.elapsed_ms, Some(0));
+    restarted.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn elapsed_time_failure_retry_keeps_prior_execution_and_old_tasks_stay_unknown() {
+    let failing = Fixture::new(Mode::NotFound, 40000).await;
+    let good = Fixture::new(Mode::Retry, 40000).await;
+    let root = tempfile::tempdir().unwrap();
+    let db = root.path().join("retry.sqlite3");
+    let manager = Manager::start(&db, failing.engine(), Arc::new(|_| {})).unwrap();
+    manager
+        .create(SOURCE.into(), root.path().into())
+        .await
+        .unwrap();
+    let failed = wait_for(&manager, |s| s.tasks[0].status == TaskStatus::Failed).await;
+    let before = failed.tasks[0].details.elapsed_ms.unwrap();
+    manager.shutdown().await.unwrap();
+    let restarted = Manager::start(&db, good.engine(), Arc::new(|_| {})).unwrap();
+    restarted
+        .action(failed.tasks[0].id.clone(), Action::Resume)
+        .await
+        .unwrap();
+    let completed = wait_for(&restarted, |s| s.tasks[0].status == TaskStatus::Completed).await;
+    assert!(completed.tasks[0].details.elapsed_ms.unwrap() > before);
+    restarted.shutdown().await.unwrap();
+    let legacy_root = tempfile::tempdir().unwrap();
+    let legacy_db = legacy_root.path().join("old.sqlite3");
+    let mut old = record(legacy_root.path());
+    old.task.status = TaskStatus::Paused;
+    Store::open(&legacy_db).unwrap().save(&old).unwrap();
+    let legacy = Manager::start(&legacy_db, good.engine(), Arc::new(|_| {})).unwrap();
+    legacy.action(old.task.id, Action::Resume).await.unwrap();
+    let completed = wait_for(&legacy, |s| s.tasks[0].status == TaskStatus::Completed).await;
+    assert!(completed.tasks[0].details.elapsed_ms.is_none());
+    legacy.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn elapsed_time_is_checkpointed_when_transfer_waits_for_bandwidth() {
+    let fixture = Fixture::new(Mode::Range, 1024 * 1024).await;
+    let root = tempfile::tempdir().unwrap();
+    let db = root.path().join("checkpoint.sqlite3");
+    let manager = Manager::start(&db, fixture.engine(), Arc::new(|_| {})).unwrap();
+    manager
+        .settings(crate::model::Settings {
+            limit_kib: 1,
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    manager
+        .create(SOURCE.into(), root.path().into())
+        .await
+        .unwrap();
+    wait_for(&manager, |s| s.tasks[0].status == TaskStatus::Downloading).await;
+    let connection =
+        rusqlite::Connection::open_with_flags(&db, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+            .unwrap();
+    tokio::time::timeout(Duration::from_secs(9), async {
+        loop {
+            let payload: String = connection
+                .query_row("SELECT payload FROM tasks", [], |row| row.get(0))
+                .unwrap();
+            let record: StoredTask = serde_json::from_str(&payload).unwrap();
+            if record.task.details.elapsed_ms.unwrap() >= 4000 {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    })
+    .await
+    .unwrap();
+    let live = manager.snapshot().await.unwrap();
+    assert!(live.tasks[0].details.elapsed_ms.unwrap() >= 4000);
+    manager.shutdown().await.unwrap();
+    let restored = Store::open(&db).unwrap().recover().unwrap();
+    assert!(!restored[0].task.details.elapsed_is_partial);
+    assert!(
+        restored[0].task.details.elapsed_ms.unwrap() >= live.tasks[0].details.elapsed_ms.unwrap()
+    );
+}
+
+#[test]
+fn elapsed_time_recovery_marks_only_interrupted_execution_and_defaults_settings() {
+    for status in [
+        TaskStatus::Probing,
+        TaskStatus::Downloading,
+        TaskStatus::Retrying,
+        TaskStatus::Verifying,
+        TaskStatus::Pausing,
+        TaskStatus::Cancelling,
+        TaskStatus::Queued,
+        TaskStatus::Paused,
+        TaskStatus::Failed,
+        TaskStatus::Completed,
+        TaskStatus::Cancelled,
+    ] {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::open(&root.path().join("recover.sqlite3")).unwrap();
+        let mut value = record(root.path());
+        value.task.status = status;
+        value.task.details.elapsed_ms = Some(1530);
+        store.save(&value).unwrap();
+        let recovered = store.recover().unwrap().remove(0);
+        assert_eq!(recovered.task.details.elapsed_ms, Some(1530));
+        assert_eq!(recovered.task.details.elapsed_is_partial, status.running());
+        assert_eq!(
+            store.recover().unwrap()[0].task.details.elapsed_is_partial,
+            status.running()
+        );
+    }
+    let old: crate::model::Settings =
+        serde_json::from_str(r#"{"limitKib":512,"closeToTray":true}"#).unwrap();
+    assert!(old.background_completion_notice);
+    let disabled: crate::model::Settings =
+        serde_json::from_str(r#"{"backgroundCompletionNotice":false}"#).unwrap();
+    assert!(!disabled.background_completion_notice);
+}
 
 #[derive(Clone, Copy, PartialEq)]
 enum Mode {
@@ -42,12 +223,17 @@ enum Mode {
     Unsatisfiable,
     NoMetadata,
     Redirect,
+    Unavailable,
+    RecoverAfterProbe,
+    SelectiveUnavailable,
+    Crawl,
 }
 
 struct Fixture {
     network: Network,
     bytes: Arc<Vec<u8>>,
     requests: Arc<Mutex<Vec<String>>>,
+    probe_gates: Arc<Mutex<HashMap<String, Arc<tokio::sync::Semaphore>>>>,
     server: tokio::task::JoinHandle<()>,
 }
 
@@ -70,6 +256,8 @@ impl Fixture {
         let requests = Arc::new(Mutex::new(Vec::new()));
         let data = bytes.clone();
         let log = requests.clone();
+        let probe_gates = Arc::new(Mutex::new(HashMap::new()));
+        let gates = probe_gates.clone();
         let server = tokio::spawn(async move {
             let mut handlers = tokio::task::JoinSet::new();
             loop {
@@ -78,7 +266,8 @@ impl Fixture {
                         let Ok((socket, _)) = result else { break; };
                         let data = data.clone();
                         let log = log.clone();
-                        handlers.spawn(async move { serve(socket, mode, data, log).await });
+                        let gates = gates.clone();
+                        handlers.spawn(async move { serve(socket, mode, data, log, gates).await });
                     }
                     _ = handlers.join_next(), if !handlers.is_empty() => (),
                 }
@@ -104,6 +293,7 @@ impl Fixture {
             network,
             bytes,
             requests,
+            probe_gates,
             server,
         }
     }
@@ -114,6 +304,15 @@ impl Fixture {
             limiter: Arc::new(crate::limiter::RateLimiter::default()),
         }
     }
+
+    fn hold_probe(&self, filename: &str) -> Arc<tokio::sync::Semaphore> {
+        let gate = Arc::new(tokio::sync::Semaphore::new(0));
+        self.probe_gates
+            .lock()
+            .unwrap()
+            .insert(filename.into(), gate.clone());
+        gate
+    }
 }
 
 async fn serve(
@@ -121,6 +320,7 @@ async fn serve(
     mode: Mode,
     data: Arc<Vec<u8>>,
     requests: Arc<Mutex<Vec<String>>>,
+    probe_gates: Arc<Mutex<HashMap<String, Arc<tokio::sync::Semaphore>>>>,
 ) {
     let mut request = Vec::new();
     let mut buffer = [0; 4096];
@@ -161,6 +361,22 @@ async fn serve(
             .map(str::to_owned)
     });
     let is_probe = range.as_deref() == Some("0-524287");
+    if is_probe {
+        let filename = request
+            .split_whitespace()
+            .nth(1)
+            .unwrap_or("")
+            .rsplit('/')
+            .next()
+            .unwrap_or("");
+        let gate = probe_gates.lock().unwrap().get(filename).cloned();
+        if let Some(gate) = gate {
+            let Ok(permit) = gate.acquire().await else {
+                return;
+            };
+            permit.forget();
+        }
+    }
     if is_probe && request.starts_with("GET /slow-probe/") {
         tokio::time::sleep(Duration::from_millis(120)).await;
     }
@@ -182,6 +398,21 @@ async fn serve(
             .filter(|range| range.as_str() != "0-524287")
             .count()
     };
+    let unavailable = mode == Mode::Unavailable
+        || mode == Mode::SelectiveUnavailable
+            && request
+                .split_whitespace()
+                .nth(1)
+                .is_some_and(|path| path.ends_with("blocked.bin"))
+        || mode == Mode::RecoverAfterProbe && is_probe && requests.lock().unwrap().len() == 1;
+    if unavailable {
+        let _ = socket
+            .write_all(
+                b"HTTP/1.1 503 Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+            )
+            .await;
+        return;
+    }
     if mode == Mode::Redirect {
         let _ = socket.write_all(b"HTTP/1.1 302 Found\r\nLocation: http://github.com/unsafe\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").await;
         return;
@@ -268,8 +499,11 @@ async fn serve(
         return;
     }
     for chunk in body.chunks(16 * 1024) {
-        if mode == Mode::Slow && !is_probe {
+        if matches!(mode, Mode::Slow | Mode::SelectiveUnavailable) && !is_probe {
             tokio::time::sleep(Duration::from_millis(12)).await;
+        }
+        if mode == Mode::Crawl && !is_probe {
+            tokio::time::sleep(Duration::from_millis(120)).await;
         }
         if socket.write_all(chunk).await.is_err() {
             return;
@@ -333,6 +567,7 @@ async fn v2_queue_order_settings_history_and_notifications() {
             limit_kib: 1024,
             close_to_tray: true,
             auto_check: false,
+            background_completion_notice: true,
         })
         .await
         .unwrap();
@@ -344,7 +579,9 @@ async fn v2_queue_order_settings_history_and_notifications() {
         .id
         .clone();
     wait_for(&manager, |s| s.tasks[0].status == TaskStatus::Downloading).await;
-    assert!(manager.diagnose(SOURCE).await.is_err());
+    let diagnosed = manager.diagnose(SOURCE).await.unwrap();
+    assert!(diagnosed.diagnostics[0].available);
+    assert_eq!(diagnosed.tasks[0].status, TaskStatus::Downloading);
     let second = manager
         .create(SOURCE.replace("file.bin", "second.bin"), root.path().into())
         .await
@@ -522,6 +759,8 @@ fn v2_upgrades_real_legacy_task_shape_without_completion_time() {
         "preferredRoute",
         "failure",
         "completedAt",
+        "elapsedMs",
+        "elapsedIsPartial",
         "queuePosition",
     ] {
         data.remove(key);
@@ -542,6 +781,7 @@ fn v2_upgrades_real_legacy_task_shape_without_completion_time() {
         Some("test/repo")
     );
     assert!(records[0].task.details.completed_at.is_none());
+    assert!(records[0].task.details.elapsed_ms.is_none());
 }
 
 #[test]
@@ -1054,3 +1294,6 @@ async fn enforces_redirect_hosts_https_and_hop_limit() {
     assert_eq!(fixture.requests.lock().unwrap().len(), 1);
     assert!(!root.path().join("file.bin").exists());
 }
+
+#[path = "route_experience_tests.rs"]
+mod route_experience_tests;

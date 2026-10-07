@@ -287,11 +287,14 @@ describe('参考布局重构的交互回归', () => {
 
   it('历史统计以当前页为范围，搜索和重置使用已有分页接口', async () => {
     const task = { ...makeTask('done', 'completed'), verification: 'failed' as const }
-    vi.mocked(downloadsApi.history).mockResolvedValue({ items: [{ task, fileState: 'missing' }], total: 41, page: 1, pageSize: 20, revision: 1 })
+    vi.mocked(downloadsApi.history).mockResolvedValue({ items: [{ task, fileState: 'missing' }, { task: makeTask('failed', 'failed'), fileState: 'unfinished' }], total: 41, page: 1, pageSize: 20, revision: 1 })
     const wrapper = render(HistoryView, { ready: true }); await flushPromises()
     expect(wrapper.get('.history-stats').text()).toContain('匹配记录41')
     expect(wrapper.get('.history-stats').text()).toContain('本页已完成1')
-    expect(wrapper.get('.history-stats').text()).toContain('本页校验失败1')
+    expect(wrapper.get('.history-stats').text()).toContain('本页下载失败1')
+    expect(wrapper.text()).not.toContain('校验')
+    expect(wrapper.findAll('.history-table thead th')).toHaveLength(8)
+    expect(wrapper.findAll('.history-table tbody tr')[0]!.findAll('td')).toHaveLength(8)
     await wrapper.get('.history-search input').setValue('test/repo')
     await wrapper.get('.history-filters select').setValue('completed')
     await wrapper.get('.history-filters').trigger('submit'); await flushPromises()
@@ -342,7 +345,7 @@ describe('参考布局重构的交互回归', () => {
 
   it('恢复默认只修改草稿，保存后才调用服务', async () => {
     vi.mocked(downloadsApi.saveSettings).mockResolvedValue(makeSnapshot())
-    const wrapper = render(SettingsView, { ready: true, settings: { limitKib: 512, closeToTray: true, autoCheck: true } })
+    const wrapper = render(SettingsView, { ready: true, settings: { limitKib: 512, closeToTray: true, autoCheck: true, backgroundCompletionNotice: true } })
     await click(wrapper, '恢复默认')
     expect(downloadsApi.saveSettings).not.toHaveBeenCalled()
     expect(wrapper.text()).toContain('保存设置后生效')
@@ -358,18 +361,25 @@ describe('参考布局重构的交互回归', () => {
     await wrapper.get('[role="switch"]').trigger('click')
     expect((wrapper.get('#rate-limit').element as HTMLInputElement).value).toBe('0')
     await wrapper.get('[role="switch"]').trigger('click')
-    expect((wrapper.get('#rate-limit').element as HTMLInputElement).value).toBe('5120')
-    await wrapper.get('#rate-limit').setValue('1.5'); await wrapper.get('form').trigger('submit')
+    expect((wrapper.get('#rate-limit').element as HTMLInputElement).value).toBe('5.24288')
+    await wrapper.get('#rate-limit').setValue('0.0001'); await wrapper.get('form').trigger('submit')
     expect(downloadsApi.saveSettings).not.toHaveBeenCalled()
-    expect(wrapper.text()).toContain('请输入 0 至 10000000 KiB/s 的整数')
+    expect(wrapper.text()).toContain('请输入 0（不限速）或 0.001024 至 10240 MB/s 之间的数值')
   })
 
-  it('线路表不将未检测显示为可用，活动任务阻止手动检测', async () => {
-    const wrapper = mount(RouteDiagnostics, { props: { ready: true, diagnosing: false, hasActive: true, url: 'https://github.com/test/repo/releases/download/v1/a.zip', reports: [] } }); wrappers.push(wrapper)
+  it('线路表不将未检测显示为可用，空输入及活动任务仍可手动检测', async () => {
+    const wrapper = mount(RouteDiagnostics, { props: { ready: true, diagnosing: false, hasActive: true, url: '', reports: [] } }); wrappers.push(wrapper)
     expect(wrapper.text()).toContain('尚未检测')
-    expect(wrapper.get('button').attributes('disabled')).toBeDefined()
-    await wrapper.setProps({ hasActive: false })
+    expect(wrapper.get('button').attributes('disabled')).toBeUndefined()
+    expect(wrapper.text()).toContain('下载继续进行')
+    expect(wrapper.text()).toContain('默认测试文件')
     await click(wrapper, '检测线路')
     expect(wrapper.emitted('diagnose')).toHaveLength(1)
+    await wrapper.setProps({ diagnosing: true })
+    expect(wrapper.get('button').attributes('disabled')).toBeDefined()
+    expect(wrapper.text()).toContain('请等待本轮检测结束')
+    await wrapper.setProps({ diagnosing: false, ready: false })
+    expect(wrapper.get('button').attributes('disabled')).toBeDefined()
+    expect(wrapper.text()).toContain('任务管理器尚未就绪')
   })
 })

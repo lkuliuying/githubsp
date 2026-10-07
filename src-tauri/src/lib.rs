@@ -1,5 +1,6 @@
 mod app;
 pub mod catalog;
+mod completion;
 mod desktop;
 pub mod engine;
 pub mod error;
@@ -12,6 +13,7 @@ pub mod manager;
 pub mod model;
 pub mod network;
 pub mod preflight;
+mod route_policy;
 pub mod source;
 pub mod store;
 pub mod updates;

@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "download-notice",
+  "description": "下载完成提醒仅订阅本窗口事件，业务命令由 Rust 按来源窗口限制。",
+  "windows": ["download-notice"],
+  "permissions": ["core:event:allow-listen", "core:event:allow-unlisten"]
+}

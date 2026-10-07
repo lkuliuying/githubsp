@@ -8,6 +8,7 @@ pub enum TaskStatus {
     Probing,
     Downloading,
     Retrying,
+    WaitingNetwork,
     Verifying,
     Pausing,
     Cancelling,
@@ -122,9 +123,26 @@ pub struct Snapshot {
     pub settings: Settings,
     pub queue_revision: u64,
     pub diagnostics: Vec<RouteReport>,
+    #[serde(default)]
+    pub diagnostic_context: Option<DiagnosticContext>,
     pub diagnosing: bool,
     pub notices: Vec<Notice>,
     pub favorites: Vec<Favorite>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum DiagnosticSource {
+    Default,
+    Input,
+    Download,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DiagnosticContext {
+    pub source: DiagnosticSource,
+    pub filename: String,
 }
 
 #[derive(Debug, Clone)]
@@ -141,6 +159,10 @@ pub enum EngineUpdate {
     Checkpoint(Checkpoint),
     Diagnostics(Vec<RouteReport>),
     Metadata(crate::network::Metadata),
+    Retry(RetryInfo, std::time::Duration),
+    SelectedRoute(String, f64, bool),
+    Cooldown(String, std::time::Instant),
+    DataReceived,
 }
 
 pub fn now_ms() -> u64 {
@@ -160,7 +182,51 @@ pub struct TaskDetails {
     pub preferred_route: Option<String>,
     pub failure: Option<Failure>,
     pub completed_at: Option<u64>,
+    pub elapsed_ms: Option<u64>,
+    pub elapsed_is_partial: bool,
     pub queue_position: u64,
+    pub retry_info: Option<RetryInfo>,
+    pub recovery_info: Option<RecoveryInfo>,
+    pub route_suggestion: Option<RouteSuggestion>,
+    pub route_failures: Vec<RouteFailure>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RetryInfo {
+    pub phase: String,
+    pub attempt: u32,
+    pub max_attempts: u32,
+    pub reason: String,
+    pub retry_in_ms: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RecoveryInfo {
+    pub remaining_ms: u64,
+    pub retry_in_ms: u64,
+    pub waiting_for_slot: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RouteSuggestion {
+    pub id: String,
+    pub route_id: String,
+    pub route_name: String,
+    pub current_seconds: u64,
+    pub suggested_seconds: u64,
+    pub restart_bytes: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RouteFailure {
+    pub route_id: String,
+    pub route_name: String,
+    pub message: String,
+    pub temporary: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -182,12 +248,24 @@ pub struct RouteReport {
     pub error: Option<String>,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct Settings {
     pub limit_kib: u32,
     pub close_to_tray: bool,
     pub auto_check: bool,
+    pub background_completion_notice: bool,
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        Self {
+            limit_kib: 0,
+            close_to_tray: false,
+            auto_check: false,
+            background_completion_notice: true,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -203,8 +281,18 @@ pub struct CreateOptions {
 #[serde(rename_all = "camelCase")]
 pub struct Notice {
     pub id: String,
+    pub kind: NoticeKind,
+    pub task_id: Option<String>,
     pub message: String,
     pub created_at: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NoticeKind {
+    DownloadCompleted,
+    DownloadFailed,
+    FavoriteUpdated,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

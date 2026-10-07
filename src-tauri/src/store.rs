@@ -87,12 +87,23 @@ impl Store {
             })?;
             crate::source::parse_release_url(&record.task.url)?;
             crate::source::validate_filename(&record.task.filename)?;
-            if record.task.status.running() || record.task.status == TaskStatus::Queued {
+            if record.task.status.running() && record.task.details.elapsed_ms.is_some() {
+                record.task.details.elapsed_is_partial = true;
+            }
+            if record.task.status.running()
+                || matches!(
+                    record.task.status,
+                    TaskStatus::Queued | TaskStatus::WaitingNetwork
+                )
+            {
                 record.task.status = TaskStatus::Paused;
                 record.task.revision += 1;
             }
             record.task.speed = 0.0;
             record.task.eta = None;
+            record.task.details.retry_info = None;
+            record.task.details.recovery_info = None;
+            record.task.details.route_suggestion = None;
             self.save(&record)?;
             records.push(record);
         }

@@ -29,6 +29,7 @@ pub fn show(app: &AppHandle) {
 }
 
 pub fn update(app: &AppHandle, snapshot: &Snapshot) {
+    crate::completion::update(app, snapshot);
     app.state::<DesktopState>()
         .close_to_tray
         .store(snapshot.settings.close_to_tray, Ordering::SeqCst);
@@ -62,6 +63,12 @@ pub fn exit(app: &AppHandle) {
         return;
     }
     let app = app.clone();
+    if let Err(error) = app
+        .state::<crate::completion::CompletionHost>()
+        .dismiss(None)
+    {
+        eprintln!("桌面提醒收起失败：{error}");
+    }
     let manager = app.state::<Manager>().inner().clone();
     if let Some(catalog) = app.try_state::<crate::catalog::Catalog>() {
         catalog.stop();
@@ -71,7 +78,10 @@ pub fn exit(app: &AppHandle) {
     }
     tauri::async_runtime::spawn(async move {
         match manager.shutdown().await {
-            Ok(_) => app.exit(0),
+            Ok(_) => {
+                app.state::<crate::completion::CompletionHost>().stop();
+                app.exit(0);
+            }
             Err(error) => {
                 app.state::<DesktopState>()
                     .exiting
@@ -89,7 +99,7 @@ pub fn exit(app: &AppHandle) {
 
 pub fn install(app: &AppHandle) -> tauri::Result<()> {
     let show_item = MenuItem::with_id(app, "show", "显示主窗口 / 查看提醒", true, None::<&str>)?;
-    let pause = MenuItem::with_id(app, "pause", "暂停当前下载", true, None::<&str>)?;
+    let pause = MenuItem::with_id(app, "pause", "暂停下载与自动恢复", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "exit", "保存进度并退出", true, None::<&str>)?;
     let menu = Menu::with_items(app, &[&show_item, &pause, &quit])?;
     let mut builder = TrayIconBuilder::with_id("main-tray")
@@ -115,14 +125,20 @@ pub fn install(app: &AppHandle) -> tauri::Result<()> {
                 let app = app.clone();
                 let manager = app.state::<Manager>().inner().clone();
                 tauri::async_runtime::spawn(async move {
-                    let result = async {
-                        let snapshot = manager.snapshot().await?;
-                        if let Some(task) = snapshot.tasks.iter().find(|t| t.status.running()) {
-                            manager.action(task.id.clone(), Action::Pause).await?;
+                    let result =
+                        async {
+                            let snapshot = manager.snapshot().await?;
+                            if let Some(task) = snapshot.tasks.iter().find(|t| t.status.running()) {
+                                manager.action(task.id.clone(), Action::Pause).await?;
+                            }
+                            for task in snapshot.tasks.iter().filter(|task| {
+                                task.status == crate::model::TaskStatus::WaitingNetwork
+                            }) {
+                                manager.action(task.id.clone(), Action::Pause).await?;
+                            }
+                            Ok::<_, crate::error::DownloadError>(())
                         }
-                        Ok::<_, crate::error::DownloadError>(())
-                    }
-                    .await;
+                        .await;
                     if let Err(error) = result {
                         app.dialog()
                             .message(error.to_string())

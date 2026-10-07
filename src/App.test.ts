@@ -3,9 +3,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from './App.vue'
 import type { DownloadTask, Snapshot } from './types'
 import { downloadsApi } from './services/downloads'
+import { noticeApi } from './services/notices'
+
+vi.mock('./services/notices', () => ({ noticeApi: { available: vi.fn(() => false), subscribeNavigation: vi.fn() } }))
 
 vi.mock('./services/downloads', () => ({
-  downloadsApi: { available: vi.fn(() => true), load: vi.fn(), create: vi.fn(), act: vi.fn(), openDirectory: vi.fn(), chooseDirectory: vi.fn(), subscribe: vi.fn(), inspectDirectory: vi.fn(), createDirectory: vi.fn(), previewBatch: vi.fn(), createBatch: vi.fn(), browse: vi.fn() },
+  downloadsApi: { available: vi.fn(() => true), load: vi.fn(), create: vi.fn(), act: vi.fn(), openDirectory: vi.fn(), chooseDirectory: vi.fn(), subscribe: vi.fn(), inspectDirectory: vi.fn(), createDirectory: vi.fn(), previewBatch: vi.fn(), createBatch: vi.fn(), browse: vi.fn(), diagnose: vi.fn() },
   errorMessage: (error: unknown) => String(error),
 }))
 
@@ -14,7 +17,7 @@ const task = (status: DownloadTask['status'] = 'paused'): DownloadTask => ({
   directory: 'F:\\下载 目录', status, downloaded: 1024, total: 4096, speed: 1024, eta: 3,
   route: 'GitHub 直连', verification: 'pending', error: null, finalPath: null, createdAt: 1, revision: 1,
 })
-const snapshot = (tasks: DownloadTask[] = [], revision = 1): Snapshot => ({ tasks, lastDirectory: 'F:\\下载 目录', error: null, revision, settings: { limitKib: 0, closeToTray: false, autoCheck: false }, queueRevision: 0, diagnostics: [], diagnosing: false, notices: [], favorites: [] })
+const snapshot = (tasks: DownloadTask[] = [], revision = 1): Snapshot => ({ tasks, lastDirectory: 'F:\\下载 目录', error: null, revision, settings: { limitKib: 0, closeToTray: false, autoCheck: false, backgroundCompletionNotice: true }, queueRevision: 0, diagnostics: [], diagnosing: false, notices: [], favorites: [] })
 let callback: (value: Snapshot) => void
 let stop = vi.fn<() => void>()
 const wrappers: ReturnType<typeof mount>[] = []
@@ -46,6 +49,72 @@ beforeEach(() => {
 afterEach(() => { wrappers.splice(0).forEach(wrapper => wrapper.unmount()); document.body.innerHTML = ''; vi.useRealTimers() })
 
 describe('下载工作台', () => {
+  it('等待恢复单独计数，全部暂停包含恢复任务且不产生失败提醒', async () => {
+    const waiting = { ...task('waiting_network'), id: 'waiting', recoveryInfo: { remainingMs: 300000, retryInMs: 10000, waitingForSlot: true } }
+    const active = task('downloading')
+    const state = snapshot([active, waiting], 2)
+    vi.mocked(downloadsApi.load).mockResolvedValue(state)
+    vi.mocked(downloadsApi.act).mockImplementation(async (id) => {
+      state.tasks = state.tasks.map(value => value.id === id ? { ...value, status: 'paused', recoveryInfo: undefined } : value)
+      return { ...state, revision: ++state.revision }
+    })
+    const wrapper = render(); await flushPromises()
+    expect(wrapper.get('.app-queue__heading').text()).toContain('1 个传输中 · 0 个排队中 · 1 个等待线路恢复')
+    expect(wrapper.text()).not.toContain('下载失败')
+    const routeDialog = wrapper.find('.route-feedback dialog').element as HTMLDialogElement
+    routeDialog.close = () => routeDialog.removeAttribute('open')
+    await click(wrapper, '全部暂停')
+    expect(downloadsApi.act).toHaveBeenCalledWith('one', 'pause')
+    expect(downloadsApi.act).toHaveBeenCalledWith('waiting', 'pause')
+    expect(wrapper.get('.app-queue__heading').text()).toContain('0 个传输中 · 0 个排队中 · 0 个等待线路恢复')
+  })
+
+  it('空输入和下载期间均可检测，重复点击去重，完成后展示真实测速目标', async () => {
+    const wrapper = render(); await flushPromises()
+    expect(wrapper.get('.route-refresh').attributes('disabled')).toBeUndefined()
+    callback(snapshot([task('downloading')], 2)); await flushPromises()
+    let finish!: (value: Snapshot) => void
+    vi.mocked(downloadsApi.diagnose).mockReturnValueOnce(new Promise(resolve => { finish = resolve }))
+    await wrapper.get('.route-refresh').trigger('click'); await wrapper.get('.route-refresh').trigger('click')
+    expect(downloadsApi.diagnose).toHaveBeenCalledExactlyOnceWith('')
+    expect(wrapper.get('.route-refresh').attributes('disabled')).toBeDefined()
+    finish({ ...snapshot([task('downloading')], 3), diagnosticContext: { source: 'default', filename: 'GitHubSP-v0.2.2-windows-x64.exe' }, diagnostics: [{ id: 'github', name: 'GitHub 直连', checkedAt: 1, bytesPerSecond: 5000000, available: true, error: null }] })
+    await flushPromises()
+    expect(wrapper.get('.route-target').text()).toContain('GitHubSP-v0.2.2-windows-x64.exe')
+    expect(wrapper.get('.route-panel').text()).toContain('5.0 MB/s')
+    expect(wrapper.get('.task-row').text()).toContain('正在下载')
+    expect(wrapper.get('.route-refresh').attributes('disabled')).toBeUndefined()
+  })
+
+  it('指定输入原样送后端，检测失败显示原因并可立即重试', async () => {
+    const wrapper = render(); await flushPromises()
+    const input = 'https://github.com/test/repo'
+    await wrapper.get('#resource-url').setValue(input)
+    vi.mocked(downloadsApi.diagnose).mockRejectedValueOnce('请输入附件直链，或清空输入后使用默认测试文件')
+    await click(wrapper, '检测线路')
+    expect(downloadsApi.diagnose).toHaveBeenCalledWith(input)
+    expect(wrapper.text()).toContain('请输入附件直链，或清空输入后使用默认测试文件')
+    expect(wrapper.get('.route-refresh').attributes('disabled')).toBeUndefined()
+    await wrapper.get('#resource-url').setValue(task().url)
+    vi.mocked(downloadsApi.diagnose).mockResolvedValue(snapshot([], 2))
+    await click(wrapper, '检测线路')
+    expect(downloadsApi.diagnose).toHaveBeenLastCalledWith(task().url)
+    expect(wrapper.text()).not.toContain('请输入附件直链，或清空输入后使用默认测试文件')
+  })
+
+  it('提醒导航切回下载页，并在卸载时取消订阅', async () => {
+    vi.mocked(noticeApi.available).mockReturnValue(true)
+    let navigate!: () => void
+    const unsubscribe = vi.fn()
+    vi.mocked(noticeApi.subscribeNavigation).mockImplementation(async callback => { navigate = callback; return unsubscribe })
+    const wrapper = render(); await flushPromises()
+    await click(wrapper, '设置')
+    expect(wrapper.find('.settings-view').exists()).toBe(true)
+    navigate(); await flushPromises()
+    expect(wrapper.find('.settings-view').exists()).toBe(false)
+    wrapper.unmount(); wrappers.splice(wrappers.indexOf(wrapper), 1)
+    expect(unsubscribe).toHaveBeenCalledOnce()
+  })
   it('保留上次目录，提交真实 API，并防止重复提交', async () => {
     const wrapper = render()
     await flushPromises()
@@ -70,8 +139,8 @@ describe('下载工作台', () => {
     callback(snapshot([task('paused')], 5))
     callback(snapshot([task('downloading')], 4))
     await flushPromises()
-    expect(wrapper.text()).toContain('已暂停')
-    expect(wrapper.text()).not.toContain('正在下载')
+    expect(wrapper.get('.task-row').text()).toContain('已暂停')
+    expect(wrapper.get('.task-row').text()).not.toContain('正在下载')
     wrapper.unmount()
     wrappers.splice(wrappers.indexOf(wrapper), 1)
     expect(stop).toHaveBeenCalledOnce()
@@ -80,13 +149,14 @@ describe('下载工作台', () => {
     expect(downloadsApi.load).toHaveBeenCalledTimes(calls)
   })
 
-  it('区分未经官方校验的完成结果，并展示失败原因和重试入口', async () => {
+  it('隐藏完成任务的校验信息，保留失败原因和重试入口', async () => {
     const finished = { ...task('completed'), verification: 'unverified' as const }
     const failed = { ...task('failed'), id: 'two', error: '下载服务返回 HTTP 404' }
     vi.mocked(downloadsApi.load).mockResolvedValue(snapshot([finished, failed]))
     const wrapper = render()
     await flushPromises()
-    expect(wrapper.text()).toContain('未通过官方摘要验证')
+    expect(wrapper.text()).not.toContain('未通过官方摘要验证')
+    expect(wrapper.findAll('.app-task-table thead th')).toHaveLength(9)
     expect(wrapper.text()).toContain('HTTP 404')
     vi.mocked(downloadsApi.act).mockResolvedValue(snapshot([finished, { ...failed, status: 'queued' }], 2))
     await wrapper.get('[aria-label="重试下载"]').trigger('click')
