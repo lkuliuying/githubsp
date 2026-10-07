@@ -1,7 +1,7 @@
 import { invoke, isTauri } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { open } from '@tauri-apps/plugin-dialog'
-import type { Snapshot, TaskAction, TaskStatus, CatalogPage, BatchPreview, BatchResult, Settings, HistoryPage, UpdateResult } from '../types'
+import type { Snapshot, TaskAction, TaskStatus, CatalogPage, BatchPreview, BatchResult, Settings, HistoryPage, UpdateResult, DirectoryInspection } from '../types'
 
 export const downloadsApi = {
   available: () => isTauri(),
@@ -22,13 +22,28 @@ export const downloadsApi = {
   checkUpdate: () => invoke<UpdateResult>('check_app_update'),
   openRelease: (url: string) => invoke<void>('open_release', { url }),
   load: () => invoke<Snapshot>('list_tasks'),
+  inspectDirectory: (directory: string) => invoke<DirectoryInspection>('inspect_directory', { directory }),
+  createDirectory: (directory: string) => invoke<string>('create_directory', { directory }),
   create: (url: string, directory: string) => invoke<Snapshot>('create_task', { url, directory }),
   act: (id: string, action: TaskAction) => invoke<Snapshot>('task_action', { id, action }),
   openDirectory: (id: string) => invoke<void>('open_directory', { id }),
   subscribe: (callback: (snapshot: Snapshot) => void) => listen<Snapshot>('downloads-changed', event => callback(event.payload)),
   chooseDirectory: async (current: string): Promise<string | null> => {
-    const selected = await open({ directory: true, multiple: false, title: '选择下载保存目录', defaultPath: current || undefined });
-    return typeof selected === 'string' ? selected : null
+    let defaultPath: string | undefined
+    if (current.trim()) {
+      try {
+        const inspected = await downloadsApi.inspectDirectory(current.trim())
+        if (inspected.state === 'existing') defaultPath = inspected.directory
+      } catch {
+        // 默认位置只是导航提示，无效输入不能阻止用户重新选择目录。
+      }
+    }
+    const selected = await open({ directory: true, multiple: false, title: '选择下载保存目录', defaultPath })
+    if (selected === null) return null
+    if (typeof selected !== 'string' || !selected.trim()) throw new Error('请选择一个已存在的目录')
+    const inspected = await downloadsApi.inspectDirectory(selected)
+    if (inspected.state !== 'existing') throw new Error('所选目录已不存在，请重新选择目录')
+    return inspected.directory
   },
 }
 

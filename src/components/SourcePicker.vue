@@ -2,10 +2,10 @@
 import { computed, onUnmounted, ref, watch } from 'vue'
 import { PhPackage, PhMagnifyingGlass, PhCaretRight, PhCaretLeft, PhPlus, PhStar, PhFiles, PhCheckCircle, PhWarningCircle } from '@phosphor-icons/vue'
 import { downloadsApi, errorMessage } from '../services/downloads'
-import { builtinRoutes, type BatchPreview, type CatalogPage, type Snapshot } from '../types'
+import { builtinRoutes, type BatchPreview, type CatalogPage, type Snapshot, type PrepareDirectory } from '../types'
 import { formatBytes } from '../format'
 
-const props = defineProps<{ directory: string; ready: boolean }>()
+const props = defineProps<{ directory: string; ready: boolean; prepareDirectory: PrepareDirectory; directoryBusy?: boolean }>()
 const emit = defineEmits<{ snapshot: [value: Snapshot]; resume: [id: string]; favorite: [repository: string] }>()
 const input = ref(''), repositoryInput = ref(''), busy = ref(false), error = ref(''), includePrerelease = ref(false), route = ref('')
 const page = ref<CatalogPage | null>(null), selected = ref<string[]>([]), preview = ref<BatchPreview | null>(null), result = ref('')
@@ -39,16 +39,29 @@ async function browse(number = 0, repository?: string) {
 async function open(value: string) { repositoryInput.value = value; await browse() }
 defineExpose({ open })
 async function prepare(fromSelection: boolean) {
-  const urls = fromSelection ? selected.value : input.value.split(/\r?\n/).map(value => value.trim()).filter(Boolean)
+  if (props.directoryBusy) return
+  const urls = fromSelection ? [...selected.value] : input.value.split(/\r?\n/).map(value => value.trim()).filter(Boolean)
   await run(async current => {
-    const value = await downloadsApi.previewBatch(urls, props.directory.trim())
+    const isCurrent = () => current === generation && !disposed && props.ready
+    const directory = await props.prepareDirectory(props.directory, isCurrent)
+    if (!directory || !isCurrent()) return
+    const value = await downloadsApi.previewBatch(urls, directory)
     if (current === generation && !disposed) preview.value = value
   })
 }
 async function submit() {
+  if (props.directoryBusy) return
   const urls = valid.value.map(item => item.url!).filter(Boolean)
+  const preferredRoute = route.value || null
   await run(async current => {
-    const value = await downloadsApi.createBatch(urls, props.directory.trim(), route.value || null)
+    const isCurrent = () => current === generation && !disposed && props.ready
+    const directory = await props.prepareDirectory(props.directory, isCurrent)
+    if (!directory || !isCurrent()) return
+    if (directory !== preview.value?.preflight.directory) {
+      preview.value = null
+      throw new Error('保存目录已变化，请重新预览后再创建任务')
+    }
+    const value = await downloadsApi.createBatch(urls, directory, preferredRoute)
     if (disposed) return
     emit('snapshot', value.snapshot)
     if (current !== generation) return
@@ -96,8 +109,8 @@ function selectRelease(id: number) { releaseId.value = id; preview.value = null 
             </tbody>
           </table>
         </div>
-        <div class="source-selection"><span>已选 {{ selected.length }} 项</span><button class="pa-btn pa-btn--soft" :disabled="busy || !ready || !selected.length || !directory.trim()" @click="prepare(true)">预览所选附件<PhCaretRight :size="14" /></button></div>
-        <div class="source-batch"><label class="pa-sr-only" for="project-source">批量附件直链，每行一个</label><textarea id="project-source" v-model="input" class="pa-input" rows="2" :disabled="!ready || busy" placeholder="在此粘贴多个附件直链，每行一个…" /><button class="pa-btn pa-btn--primary" :disabled="!ready || busy || !input.trim() || !directory.trim()" @click="prepare(false)"><PhPlus :size="17" />预览批量链接</button></div>
+        <div class="source-selection"><span>已选 {{ selected.length }} 项</span><button class="pa-btn pa-btn--soft" :disabled="busy || directoryBusy || !ready || !selected.length || !directory.trim()" @click="prepare(true)">预览所选附件<PhCaretRight :size="14" /></button></div>
+        <div class="source-batch"><label class="pa-sr-only" for="project-source">批量附件直链，每行一个</label><textarea id="project-source" v-model="input" class="pa-input" rows="2" :disabled="!ready || busy" placeholder="在此粘贴多个附件直链，每行一个…" /><button class="pa-btn pa-btn--primary" :disabled="!ready || busy || directoryBusy || !input.trim() || !directory.trim()" @click="prepare(false)"><PhPlus :size="17" />预览批量链接</button></div>
       </div>
     </div>
     <p class="source-note">每批最多 100 项，保存到上方目录。GitHub 自动生成的源码包不属于 Release 附件。</p>
@@ -106,7 +119,7 @@ function selectRelease(id: number) { releaseId.value = id; preview.value = null 
       <p>已知总大小 {{ formatBytes(preview.knownSize) }} · 大小未知 {{ preview.unknownCount }} 项 · 可用空间 {{ formatBytes(preview.preflight.available) }}</p>
       <p class="pa-muted">{{ preview.preflight.warning || '已按分片与合并文件检查空间。' }} 目标：{{ preview.preflight.directory }}</p>
       <ul><li v-for="(item, index) in preview.items" :key="index"><span class="pa-badge" :class="item.status === 'valid' ? 'pa-badge--success' : 'pa-badge--warning'">{{ item.status === 'valid' ? '有效' : item.status === 'duplicate' ? '重复' : '无效' }}</span> {{ item.filename || item.input }} <span>{{ item.message }}</span><button v-if="item.taskId" class="pa-btn" :disabled="busy" @click="emit('resume', item.taskId)">继续原任务</button></li></ul>
-      <div class="source-preview-actions"><label>下载线路 <select v-model="route" class="pa-input" :disabled="busy"><option v-for="item in builtinRoutes" :key="item.id" :value="item.id">{{ item.name }}</option></select></label><button class="pa-btn pa-btn--primary" :disabled="busy || !valid.length || !ready" @click="submit">确认创建有效任务</button><button class="pa-btn" :disabled="busy" @click="preview = null">返回修改</button></div>
+      <div class="source-preview-actions"><label>下载线路 <select v-model="route" class="pa-input" :disabled="busy"><option v-for="item in builtinRoutes" :key="item.id" :value="item.id">{{ item.name }}</option></select></label><button class="pa-btn pa-btn--primary" :disabled="busy || directoryBusy || !valid.length || !ready" @click="submit">确认创建有效任务</button><button class="pa-btn" :disabled="busy" @click="preview = null">返回修改</button></div>
     </div>
   </section>
 </template>

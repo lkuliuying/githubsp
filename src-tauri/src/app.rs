@@ -181,6 +181,22 @@ async fn list_tasks(manager: State<'_, Manager>) -> std::result::Result<Snapshot
 }
 
 #[tauri::command]
+async fn inspect_directory(
+    directory: String,
+) -> std::result::Result<crate::preflight::DirectoryInspection, String> {
+    crate::preflight::inspect_directory_async(PathBuf::from(directory.trim()))
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn create_directory(directory: String) -> std::result::Result<PathBuf, String> {
+    crate::preflight::create_directory_async(PathBuf::from(directory.trim()))
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 async fn create_task(
     url: String,
     directory: String,
@@ -309,6 +325,8 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             list_tasks,
+            inspect_directory,
+            create_directory,
             create_task,
             task_action,
             open_directory,

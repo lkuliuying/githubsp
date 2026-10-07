@@ -25,13 +25,20 @@ const queued = computed(() => snapshot.value.tasks.filter(task => task.status ==
 const url = ref('')
 const directory = ref('')
 const selecting = ref(false)
+const submitting = ref(false)
+const directorySource = ref<'input' | 'selected'>('input')
+const preparingDirectory = ref(false)
+const directoryDialog = ref<HTMLDialogElement>()
+const directoryToCreate = ref<string | null>(null)
+let resolveDirectoryConfirmation: ((confirmed: boolean) => void) | undefined
+let inputRevision = 0
 const dialog = ref<HTMLDialogElement>()
 const cancelId = ref<string | null>(null)
 const confirmation = ref<'cancel' | 'clear'>('cancel')
 const batchAction = ref(false)
 const showHint = ref(true)
 let disposed = false
-onUnmounted(() => { disposed = true })
+onUnmounted(() => { disposed = true; finishDirectoryConfirmation(false) })
 const directoryTouched = ref(false)
 const activeStates = ['probing', 'downloading', 'retrying', 'verifying', 'pausing', 'cancelling']
 const activeCount = computed(() => snapshot.value.tasks.filter(task => activeStates.includes(task.status)).length)
@@ -39,30 +46,92 @@ const completedCount = computed(() => snapshot.value.tasks.filter(task => task.s
 const resumable = computed(() => snapshot.value.tasks.filter(task => ['paused', 'failed'].includes(task.status)))
 const pausable = computed(() => snapshot.value.tasks.filter(task => ['queued', 'probing', 'downloading', 'retrying', 'verifying'].includes(task.status)))
 const ready = computed(() => available && !loading.value && !snapshot.value.error && snapshot.value.revision >= 0)
-const canCreate = computed(() => ready.value && !!url.value.trim() && !!directory.value.trim() && !pending.value.has('create'))
+const directoryBusy = computed(() => selecting.value || submitting.value || preparingDirectory.value || pending.value.has('create'))
+const canCreate = computed(() => ready.value && !!url.value.trim() && !!directory.value.trim() && !directoryBusy.value)
 watch(() => snapshot.value.lastDirectory, value => { if (!directoryTouched.value && value) directory.value = value })
+watch([directory, url, view, directorySource, ready], () => {
+  inputRevision++
+  finishDirectoryConfirmation(false)
+}, { flush: 'sync' })
+
+function finishDirectoryConfirmation(confirmed: boolean) {
+  const resolve = resolveDirectoryConfirmation
+  resolveDirectoryConfirmation = undefined
+  directoryToCreate.value = null
+  if (directoryDialog.value?.open) directoryDialog.value.close()
+  if (resolve) void nextTick(() => {
+    if (!disposed && ready.value && view.value === 'downloads') document.getElementById('save-directory')?.focus()
+  })
+  resolve?.(confirmed)
+}
+
+async function prepareDirectory(input: string, isCurrent: () => boolean): Promise<string | null> {
+  if (preparingDirectory.value || selecting.value || !ready.value || disposed) return null
+  const revision = inputRevision
+  const current = () => !disposed && ready.value && input.trim() === directory.value.trim() && revision === inputRevision && isCurrent()
+  preparingDirectory.value = true
+  error.value = ''
+  try {
+    const inspected = await downloadsApi.inspectDirectory(input.trim())
+    if (!current()) return null
+    if (inspected.state === 'existing') return inspected.directory
+    if (directorySource.value === 'selected') throw new Error('所选目录已不存在，请重新选择目录')
+    directoryToCreate.value = inspected.directory
+    const confirmed = new Promise<boolean>(resolve => { resolveDirectoryConfirmation = resolve })
+    await nextTick()
+    if (!current() || !directoryDialog.value) return null
+    directoryDialog.value.showModal()
+    if (!await confirmed || !current()) return null
+    const created = await downloadsApi.createDirectory(inspected.directory)
+    return current() ? created : null
+  } finally {
+    finishDirectoryConfirmation(false)
+    preparingDirectory.value = false
+  }
+}
+
+function directoryEdited() {
+  directoryTouched.value = true
+  directorySource.value = 'input'
+}
 
 async function selectDirectory() {
-  if (selecting.value || !ready.value) return
+  if (directoryBusy.value || !ready.value) return
+  const revision = inputRevision
   selecting.value = true
+  error.value = ''
   try {
     const chosen = await downloadsApi.chooseDirectory(directory.value)
-    if (chosen) { directory.value = chosen; directoryTouched.value = true }
-  } catch (cause) { error.value = errorMessage(cause) }
+    if (!disposed && revision === inputRevision && chosen) {
+      directory.value = chosen; directoryTouched.value = true; directorySource.value = 'selected'
+    }
+  } catch (cause) { if (!disposed && revision === inputRevision) error.value = errorMessage(cause) }
   finally { selecting.value = false }
 }
 async function submit() {
   if (!canCreate.value) return
-  if (!/^https:\/\/github\.com\/[^/]+\/[^/]+\/releases\/download\//.test(url.value.trim())) {
-    await picker.value?.open(url.value.trim())
-    return
+  const source = url.value.trim(), revision = inputRevision
+  submitting.value = true
+  try {
+    if (!/^https:\/\/github\.com\/[^/]+\/[^/]+\/releases\/download\//.test(source)) {
+      await picker.value?.open(source)
+      return
+    }
+    const target = await prepareDirectory(directory.value, () => revision === inputRevision)
+    if (!target || disposed || revision !== inputRevision) return
+    if (await create(source, target) && !disposed && revision === inputRevision) url.value = ''
+  } catch (cause) {
+    if (!disposed && revision === inputRevision) error.value = errorMessage(cause)
+  } finally {
+    submitting.value = false
   }
-  if (await create(url.value.trim(), directory.value.trim())) url.value = ''
 }
 async function redownload(task: DownloadTask) {
-  if (!ready.value) return
-  try { const chosen = await downloadsApi.chooseDirectory(task.directory); if (chosen) await create(task.url, chosen) }
-  catch (cause) { error.value = errorMessage(cause) }
+  if (!ready.value || directoryBusy.value) return
+  selecting.value = true
+  try { const chosen = await downloadsApi.chooseDirectory(task.directory); if (chosen && !disposed && ready.value) await create(task.url, chosen) }
+  catch (cause) { if (!disposed) error.value = errorMessage(cause) }
+  finally { selecting.value = false }
 }
 async function diagnose() { await perform('diagnose', () => downloadsApi.diagnose(url.value)) }
 async function hide() { await perform('hide', () => downloadsApi.hide()) }
@@ -132,15 +201,15 @@ async function confirmAction() {
 
       <div v-show="view === 'downloads'" class="app-downloads">
         <section class="pa-panel app-composer" aria-labelledby="new-download-title">
-          <div class="section-heading"><span class="section-heading__icon"><PhPlus :size="24" weight="bold" /></span><div class="section-heading__body"><h1 id="new-download-title">新建下载</h1><p>粘贴 Release 附件链接或仓库地址，选择保存目录即可添加下载任务。</p></div></div>
+          <div class="section-heading"><span class="section-heading__icon"><PhPlus :size="24" weight="bold" /></span><div class="section-heading__body"><h1 id="new-download-title">新建下载</h1><p>粘贴 Release 附件链接或仓库地址，输入或选择保存目录即可添加下载任务。</p></div></div>
           <form @submit.prevent="submit">
             <div class="pa-input-group app-source"><PhLink :size="21" /><label class="pa-sr-only" for="resource-url">GitHub 资源链接</label><input id="resource-url" v-model="url" class="pa-input" type="url" placeholder="请输入 GitHub 链接，例如 https://github.com/owner/repo/releases/latest" autocomplete="off" spellcheck="false" :disabled="!ready" required /></div>
-            <div class="pa-input-group app-directory__control"><PhFolderOpen :size="21" /><label class="pa-sr-only" for="save-directory">保存到</label><input id="save-directory" v-model="directory" class="pa-input" placeholder="选择保存目录" :disabled="!ready" required @input="directoryTouched = true" /><button type="button" class="pa-btn" :disabled="!ready || selecting" @click="selectDirectory">{{ selecting ? '选择中…' : '浏览' }}</button></div>
-            <button class="pa-btn pa-btn--primary app-submit" type="submit" :disabled="!canCreate"><PhPlus :size="20" weight="bold" />{{ pending.has('create') ? '正在添加…' : '添加下载任务' }}</button>
+            <div class="pa-input-group app-directory__control"><PhFolderOpen :size="21" /><label class="pa-sr-only" for="save-directory">保存到</label><input id="save-directory" v-model="directory" class="pa-input" placeholder="输入或选择保存目录" :disabled="!ready" required @input="directoryEdited" /><button type="button" class="pa-btn" :disabled="!ready || directoryBusy" @click="selectDirectory">{{ selecting ? '选择中…' : '浏览' }}</button></div>
+            <button class="pa-btn pa-btn--primary app-submit" type="submit" :disabled="!canCreate"><PhPlus :size="20" weight="bold" />{{ submitting ? '正在添加…' : '添加下载任务' }}</button>
           </form>
         </section>
         <div class="app-workbench">
-          <SourcePicker ref="picker" :directory="directory" :ready="ready" @snapshot="apply" @resume="id => act(id, 'resume')" @favorite="favorite" />
+          <SourcePicker ref="picker" :directory="directory" :ready="ready" :prepare-directory="prepareDirectory" :directory-busy="directoryBusy" @snapshot="apply" @resume="id => act(id, 'resume')" @favorite="favorite" />
           <RouteDiagnostics :reports="snapshot.diagnostics" :diagnosing="snapshot.diagnosing || pending.has('diagnose')" :ready="ready" :has-active="activeCount > 0" :url="url" @diagnose="diagnose" />
         </div>
         <section class="pa-panel app-queue" aria-labelledby="queue-title" :aria-busy="loading">
@@ -167,12 +236,18 @@ async function confirmAction() {
       <FavoritesView v-if="view === 'favorites'" :favorites="snapshot.favorites" :ready="ready" @snapshot="apply" @browse="browseFavorite" />
       <SettingsView v-if="view === 'settings'" :settings="snapshot.settings" :ready="ready" @snapshot="apply"><UpdateView :ready="ready" /></SettingsView>
     </main>
-    <footer class="app-footer"><span>GitHubSP <strong>v0.2.0</strong><i />简单 · 稳定 · 专注下载</span><span><PhClockCounterClockwise :size="15" />逐个下载 · 关闭时保存进度 · 重启后手动继续</span></footer>
+    <footer class="app-footer"><span>GitHubSP <strong>v0.2.1</strong><i />简单 · 稳定 · 专注下载</span><span><PhClockCounterClockwise :size="15" />逐个下载 · 关闭时保存进度 · 重启后手动继续</span></footer>
     <dialog ref="dialog" class="app-dialog" @close="cancelId = null">
       <h2>{{ confirmation === 'clear' ? '清空已完成的记录？' : '取消这个下载？' }}</h2>
       <p>{{ confirmation === 'clear' ? '仅移除已完成任务的记录，下载文件会保留在原目录。' : '将停止下载并删除该任务的临时分片。已完成的文件不受影响。' }}</p>
       <p v-if="confirmation === 'cancel'" class="pa-muted">如果之后还要继续，请选择“暂停下载”。</p>
       <div class="app-dialog__actions"><button class="pa-btn" autofocus @click="dialog?.close()">保留记录</button><button class="pa-btn pa-btn--danger" @click="confirmAction">{{ confirmation === 'clear' ? '清空记录，保留文件' : '取消并清理' }}</button></div>
+    </dialog>
+    <dialog ref="directoryDialog" class="app-dialog app-directory-dialog" aria-labelledby="create-directory-title" aria-describedby="create-directory-description" @cancel.prevent="finishDirectoryConfirmation(false)" @close="!directoryDialog?.open && finishDirectoryConfirmation(false)">
+      <h2 id="create-directory-title">当前目录不存在，是否新建目录？</h2>
+      <p class="app-directory-dialog__path">{{ directoryToCreate }}</p>
+      <p id="create-directory-description">将创建该目录及缺失的父目录，然后继续刚才的操作。</p>
+      <div class="app-dialog__actions"><button class="pa-btn" autofocus @click="finishDirectoryConfirmation(false)">取消</button><button class="pa-btn pa-btn--primary" @click="finishDirectoryConfirmation(true)">新建并继续</button></div>
     </dialog>
   </div>
 </template>
@@ -217,6 +292,7 @@ main { flex: 1; min-width: 0; padding: 14px 20px 22px; }
 .app-footer strong { font-weight: 400; }.app-footer i { height: 12px; border-left: 1px solid var(--border-strong); margin: 0 4px; }
 .app-dialog { width: 430px; max-width: calc(100vw - 32px); border: 1px solid var(--border); border-radius: 14px; padding: 26px; color: var(--text); box-shadow: 0 18px 60px #14294330; }
 .app-dialog::backdrop { background: #17274766; }.app-dialog h2 { font-size: 19px; margin: 0 0 15px; }.app-dialog p { font-size: 13px; line-height: 1.8; }.app-dialog__actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 24px; flex-wrap: wrap; }
+.app-directory-dialog__path { overflow-wrap: anywhere; max-height: 30vh; overflow-y: auto; }
 @media (max-width: 1199px) { .app-header { gap: 12px; padding: 0 20px; }.app-brand strong { font-size: 20px; }.app-brand span { font-size: 10px; }.app-nav button { padding: 14px 17px; }.app-workbench { grid-template-columns: minmax(0, 1fr); }.app-queue__heading { flex-wrap: wrap; }.app-queue__heading .section-heading__body { display: block; }.app-composer .section-heading__body { display: block; }.app-composer .section-heading p { margin-top: 3px; } }
 @media (max-width: 800px) { .app-header { grid-template-columns: 1fr auto; padding: 12px 16px 0; gap: 10px; }.app-nav { grid-column: 1 / -1; grid-row: 2; justify-content: center; }.app-nav button { flex: 1; padding: 12px; }.app-tray { grid-column: 2; grid-row: 1; }.app-brand span { font-size: 11px; }main { padding: 12px; }.app-composer form { grid-template-columns: minmax(0, 1fr) auto; }.app-source { grid-column: 1 / -1; }.app-queue__toolbar { width: 100%; }.app-footer { padding: 12px 16px; } }
 @media (max-width: 480px) { .app-brand > svg { width: 35px; }.app-brand span { font-size: 10px; }.app-tray { font-size: 11px; padding: 6px; }.app-nav button { font-size: 13px; gap: 6px; }.app-composer form { grid-template-columns: minmax(0, 1fr); }.app-source { grid-column: auto; }.app-hintbar { align-items: flex-start; }.app-hintbar > svg { margin-top: 4px; }.app-queue__toolbar .pa-btn { flex: 1; padding: 7px; }}

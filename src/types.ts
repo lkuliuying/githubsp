@@ -1,5 +1,7 @@
 export type TaskStatus = 'queued' | 'probing' | 'downloading' | 'retrying' | 'verifying' | 'pausing' | 'cancelling' | 'paused' | 'completed' | 'failed' | 'cancelled'
 export type TaskAction = 'pause' | 'resume' | 'cancel' | 'remove'
+export interface DirectoryInspection { directory: string; state: 'existing' | 'missing' }
+export type PrepareDirectory = (directory: string, isCurrent: () => boolean) => Promise<string | null>
 
 export interface DownloadTask {
   id: string

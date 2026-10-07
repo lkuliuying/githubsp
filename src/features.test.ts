@@ -6,16 +6,17 @@ import HistoryView from './components/HistoryView.vue'
 import FavoritesView from './components/FavoritesView.vue'
 import UpdateView from './components/UpdateView.vue'
 import { downloadsApi } from './services/downloads'
-import type { CatalogPage, Snapshot } from './types'
+import type { CatalogPage, Snapshot, PrepareDirectory } from './types'
 
 vi.mock('./services/downloads', () => ({ downloadsApi: { browse: vi.fn(), previewBatch: vi.fn(), createBatch: vi.fn(), saveSettings: vi.fn(), history: vi.fn(), act: vi.fn(), copy: vi.fn(), openDirectory: vi.fn(), favorite: vi.fn(), checkFavorites: vi.fn(), removeFavorite: vi.fn(), checkUpdate: vi.fn(), openRelease: vi.fn() }, errorMessage: (value: unknown) => String(value) }))
 const snapshot: Snapshot = { tasks: [], lastDirectory: 'F:\\下载', error: null, revision: 1, queueRevision: 0, settings: { limitKib: 0, closeToTray: false, autoCheck: false }, diagnostics: [], diagnosing: false, notices: [], favorites: [] }
 const url = 'https://github.com/test/repo/releases/download/v1/file.exe'
 const catalog: CatalogPage = { repository: 'test/repo', page: 0, hasMore: false, selectedUrl: null, releases: [{ id: 1, tag: 'v1', name: 'v1', prerelease: false, notes: '', url: 'https://github.com/test/repo/releases/tag/v1', assets: [{ id: 2, name: '中文安装包-x64.exe', url, size: 1024, sha256: 'a'.repeat(64), hints: ['Windows', 'x64'] }] }] }
 const wrappers: ReturnType<typeof mount>[] = []
-function render(component: Parameters<typeof mount>[0], props: Record<string, unknown>) { const wrapper = mount(component, { props, attachTo: document.body }); wrappers.push(wrapper); return wrapper }
+const prepareDirectory = vi.fn<PrepareDirectory>()
+function render(component: Parameters<typeof mount>[0], props: Record<string, unknown>) { const wrapper = mount(component, { props: { ...(component === SourcePicker ? { prepareDirectory } : {}), ...props }, attachTo: document.body }); wrappers.push(wrapper); return wrapper }
 const click = async (wrapper: ReturnType<typeof mount>, label: string) => { const button = wrapper.findAll('button').find(button => button.text().includes(label)); expect(button, label).toBeDefined(); await button!.trigger('click'); await flushPromises() }
-beforeEach(() => { vi.resetAllMocks() })
+beforeEach(() => { vi.resetAllMocks(); prepareDirectory.mockImplementation(async directory => directory.trim()) })
 afterEach(() => { wrappers.splice(0).forEach(wrapper => wrapper.unmount()); document.body.innerHTML = '' })
 
 describe('三批功能用户流程', () => {
@@ -33,9 +34,28 @@ describe('三批功能用户流程', () => {
   it('保存目录变化使正在返回的批量预览失效', async () => {
     let finish!: (value: Awaited<ReturnType<typeof downloadsApi.previewBatch>>) => void
     vi.mocked(downloadsApi.previewBatch).mockReturnValue(new Promise(resolve => { finish = resolve }))
-    const wrapper = mount(SourcePicker, { props: { directory: 'F:\\旧目录', ready: true } }); wrappers.push(wrapper); await wrapper.get('#project-source').setValue(url); await click(wrapper, '预览批量')
+    const wrapper = mount(SourcePicker, { props: { directory: 'F:\\旧目录', ready: true, prepareDirectory } }); wrappers.push(wrapper); await wrapper.get('#project-source').setValue(url); await click(wrapper, '预览批量')
     await wrapper.setProps({ directory: 'F:\\新目录' }); finish({ items: [], knownSize: 0, unknownCount: 0, preflight: { directory: 'F:\\旧目录', available: 100, required: 0, warning: null } }); await flushPromises()
     expect(wrapper.find('[aria-label="批量预览"]').exists()).toBe(false)
+  })
+  it('目录准备取消时不请求批量预览，保留原链接', async () => {
+    prepareDirectory.mockResolvedValue(null)
+    const wrapper = render(SourcePicker, { directory: 'F:\\下载', ready: true })
+    await wrapper.get('#project-source').setValue(url); await click(wrapper, '预览批量')
+    expect(downloadsApi.previewBatch).not.toHaveBeenCalled()
+    expect(downloadsApi.createBatch).not.toHaveBeenCalled()
+    expect((wrapper.get('#project-source').element as HTMLTextAreaElement).value).toBe(url)
+  })
+  it('等待目录准备时修改目录使旧批量操作失效', async () => {
+    let finish!: (directory: string) => void
+    prepareDirectory.mockReturnValue(new Promise(resolve => { finish = resolve }))
+    const wrapper = mount(SourcePicker, { props: { directory: 'F:\\旧目录', ready: true, prepareDirectory } })
+    wrappers.push(wrapper)
+    await wrapper.get('#project-source').setValue(url); await click(wrapper, '预览批量')
+    await wrapper.setProps({ directory: 'F:\\新目录' })
+    finish('F:\\旧目录'); await flushPromises()
+    expect(downloadsApi.previewBatch).not.toHaveBeenCalled()
+    expect(downloadsApi.createBatch).not.toHaveBeenCalled()
   })
   it('限速拒绝非法值，保存完整设置并显示成功', async () => {
     vi.mocked(downloadsApi.saveSettings).mockResolvedValue(snapshot)

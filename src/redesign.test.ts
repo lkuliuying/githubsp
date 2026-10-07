@@ -23,7 +23,7 @@ const makeTask = (id: string, status: DownloadTask['status']): DownloadTask => (
 const makeSnapshot = (tasks: DownloadTask[] = []): Snapshot => ({ tasks, lastDirectory: 'F:\\下载', error: null, revision: 1, settings: defaultSettings(), queueRevision: 0, diagnostics: [], diagnosing: false, notices: [], favorites: [] })
 const wrappers: ReturnType<typeof mount>[] = []
 function render(component: Parameters<typeof mount>[0], props: Record<string, unknown> = {}) {
-  const wrapper = mount(component, { props, attachTo: document.body }); wrappers.push(wrapper); return wrapper
+  const wrapper = mount(component, { props: { ...(component === SourcePicker ? { prepareDirectory: async (directory: string) => directory.trim() } : {}), ...props }, attachTo: document.body }); wrappers.push(wrapper); return wrapper
 }
 async function click(wrapper: ReturnType<typeof mount>, label: string) {
   const button = wrapper.findAll('button').find(item => item.text().includes(label))
