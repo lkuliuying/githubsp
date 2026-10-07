@@ -23,6 +23,7 @@ export const downloadsApi = {
   checkFavorites: (repository: string | null = null) => invoke<Snapshot>('check_favorites', { repository }),
   checkUpdate: () => invoke<UpdateResult>('check_app_update'),
   openRelease: (url: string) => invoke<void>('open_release', { url }),
+  openUpdateLink: (url: string) => invoke<void>('open_update_link', { url }),
   load: () => invoke<Snapshot>('list_tasks'),
   inspectDirectory: (directory: string) => invoke<DirectoryInspection>('inspect_directory', { directory }),
   createDirectory: (directory: string) => invoke<string>('create_directory', { directory }),

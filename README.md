@@ -97,7 +97,7 @@ try {
 }
 ```
 
-只读取最新正式 Release，按语义化版本比较并接受 `v` 前缀；更新说明以文本显示，官方发布页由用户打开。不下载覆盖本程序、不执行安装。测试用可控服务验证未配置、比较及限流逻辑；公开 Release 的可访问性与桌面界面实际点击验收是不同的验证范围。
+只读取最新正式 Release，按语义化版本比较并接受 `v` 前缀；更新说明通过 `markdown-it` 渲染标题、列表、强调、代码、引用和表格，保留原有面板和滚动区域。原始 HTML 作为文本显示，图片只展示替代文字，不自动请求远程资源；不提供代码高亮或额外 Markdown 插件。说明中的有效 HTTPS GitHub 链接（包括 `compare` 页面）由用户点击后通过独立的 `open_update_link` 接口在系统浏览器打开；前后端拒绝站外地址、非 HTTPS、凭据、非标准端口及非法地址，其他链接保留不可点击文字。打开失败保留说明正文并允许重试。官方发布页按钮继续使用原有 `open_release` 校验规则。不下载覆盖本程序、不执行安装。测试用可控服务验证未配置、比较及限流逻辑；公开 Release 的可访问性与桌面界面实际点击验收是不同的验证范围。
 
 ## 下载规则
 
@@ -167,6 +167,7 @@ npm run tauri -- build --no-bundle --ci -- --locked
 | `src/components/SourcePicker.vue`、`RouteControls.vue` | 附件、多行链接、批量确认、线路操作 |
 | `src/components/RouteDiagnostics.vue` | 真实内置线路检测结果、未检测/失败状态及手动检测入口 |
 | `src/components/HistoryView.vue`、`FavoritesView.vue`、`SettingsView.vue`、`UpdateView.vue` | 历史、收藏、设置、自身更新入口 |
+| `src/components/UpdateNotes.vue`、`src/updateNotes.ts` | 更新说明 Markdown 渲染与链接交互；系统打开前由 Rust 再次校验 |
 | `src-tauri/src/catalog.rs`、`intake.rs`、`preflight.rs` | 官方资源、缓存/退避、批量边界与目录空间检查 |
 | `src-tauri/src/limiter.rs`、`history.rs`、`desktop.rs` | 共享限速、历史页文件检查、托盘与桌面生命周期 |
 | `src-tauri/src/library.rs`、`updates.rs` | 收藏检查调度及独立的软件版本比较 |
@@ -174,7 +175,7 @@ npm run tauri -- build --no-bundle --ci -- --locked
 
 命令为 `list_tasks`、`create_task`、`task_action`（暂停、继续、取消、移除记录）、`open_directory`。`downloads-changed` 发送包含递增版本号的任务快照；快照携带 ID、状态、字节数、速度、线路与校验结果。Vue 不直接执行网络或文件操作。
 
-保留以上命令，新增 `browse_releases`、`preview_batch`、`create_batch`、`change_route`、`diagnose_routes`、`save_settings`、`reorder_queue`、`query_history`、`acknowledge_notices`、`hide_to_tray`、`add_favorite`、`remove_favorite`、`check_favorites`、`check_app_update`、`open_release`。Rust actor 持有权威任务、收藏、设置状态；队列有独立版本号，前端拒绝过期快照。IPC、目录选择和剪贴板写入都经过类型化服务。
+保留以上命令，新增 `browse_releases`、`preview_batch`、`create_batch`、`change_route`、`diagnose_routes`、`save_settings`、`reorder_queue`、`query_history`、`acknowledge_notices`、`hide_to_tray`、`add_favorite`、`remove_favorite`、`check_favorites`、`check_app_update`、`open_release`、`open_update_link`。Rust actor 持有权威任务、收藏、设置状态；队列有独立版本号，前端拒绝过期快照。IPC、目录选择和剪贴板写入都经过类型化服务。
 
 `diagnose_routes(url)` 保持原接口，默认检测地址由 Rust 管理。actor 持有手动检测工作任务和回复通道，统一释放忙碌状态并在退出时取消；内部检测序号隔离手动与自动结果，不影响下载引擎的选线。快照兼容增加可选的 `diagnosticContext`，包含 `source`（`default`／`input`／`download`）和 `filename`。检测结果继续保存在原有 `diagnostics` JSON 中，不修改表结构；上下文仅存在本次会话，重启恢复的缓存显示为历史结果。
 
@@ -216,7 +217,7 @@ cargo run --manifest-path src-tauri/Cargo.toml --example benchmark_routes -- "ht
 cargo run --manifest-path src-tauri/Cargo.toml --example verify_v2 -- "https://github.com/cli/cli" "artifacts/acceptance-v0.2.0/批量与迁移" "artifacts/acceptance/下载验证/verification.sqlite3"
 ```
 
-验收目录必须全新；原数据库只读，迁移写入仅发生在副本。测试资产、浏览器截图和构建缓存不属于源码。浏览器布局验证、Rust 下载验证与 Windows 原生点击验证分别记录，不能相互替代。Release 页面列出该版本实际执行的验证及剩余限制。
+验收目录必须全新；原数据库只读，迁移写入仅发生在副本。测试资产、浏览器截图和构建缓存不属于源码。浏览器布局验证、Rust 下载验证与 Windows 原生点击验证分别记录，不能相互替代。Release 更新说明面向用户，描述功能变化、下载与使用方法，以及影响使用的限制和兼容性提醒。测试数量、构建检查、验收过程及未执行测试等开发验证结果单独保留在维护者验收记录中，不写入更新说明。
 
 ## 已知限制
 
@@ -321,7 +322,7 @@ try {
 }
 ```
 
-Only the latest stable Release is checked. Versions follow semantic versioning and may have a `v` prefix. Release notes are displayed as text, and users open the official page themselves. The app does not replace its executable or install updates. Controlled-server tests cover missing configuration, comparison, and rate limiting. Public Release availability and actually clicking the native update UI are separate verification scopes.
+Only the latest stable Release is checked. Versions follow semantic versioning and may have a `v` prefix. Release notes use `markdown-it` to render headings, lists, emphasis, code, quotations, and tables within the existing panel and scroll area. Raw HTML is shown as text; images display alternative text without requesting remote resources. No syntax highlighter or extra Markdown plugins are included. Clicking a valid HTTPS GitHub link, including a `compare` page, opens the system browser through the separate `open_update_link` command. Frontend and backend reject external domains, non-HTTPS URLs, credentials, nonstandard ports, and malformed addresses; other links remain non-clickable text. Opening failures preserve the notes and allow retry. The official release-page button retains the existing `open_release` validation. The app does not replace its executable or install updates. Controlled-server tests cover missing configuration, comparison, and rate limiting. Public Release availability and actually clicking the native update UI are separate verification scopes.
 
 ## Download rules
 
@@ -391,6 +392,7 @@ Release builds rebuild the frontend and retain locked Cargo dependencies, then c
 | `src/components/SourcePicker.vue`, `src/components/RouteControls.vue` | Asset selection, multiline URLs, batch confirmation, and route controls |
 | `src/components/RouteDiagnostics.vue` | Built-in route results, pending/failure states, and manual checks |
 | `src/components/HistoryView.vue`, `src/components/FavoritesView.vue`, `src/components/SettingsView.vue`, `src/components/UpdateView.vue` | History, favorites, settings, and application-update UI |
+| `src/components/UpdateNotes.vue`, `src/updateNotes.ts` | Release-note Markdown rendering and link interactions; Rust revalidates links before opening the browser |
 | `src-tauri/src/catalog.rs`, `src-tauri/src/intake.rs`, `src-tauri/src/preflight.rs` | Official catalog, caching/backoff, batch boundaries, and directory/space checks |
 | `src-tauri/src/limiter.rs`, `src-tauri/src/history.rs`, `src-tauri/src/desktop.rs` | Shared bandwidth limit, history file checks, tray, and desktop lifecycle |
 | `src-tauri/src/library.rs`, `src-tauri/src/updates.rs` | Favorite-check scheduling and application version comparison |
@@ -398,7 +400,7 @@ Release builds rebuild the frontend and retain locked Cargo dependencies, then c
 
 The original commands are `list_tasks`, `create_task`, `task_action` (pause, resume, cancel, remove record), and `open_directory`. The `downloads-changed` event carries snapshots with increasing revisions, task IDs, status, byte counts, speed, routes, and verification results. Vue does not perform network or filesystem work directly.
 
-Additional commands are `browse_releases`, `preview_batch`, `create_batch`, `change_route`, `diagnose_routes`, `save_settings`, `reorder_queue`, `query_history`, `acknowledge_notices`, `hide_to_tray`, `add_favorite`, `remove_favorite`, `check_favorites`, `check_app_update`, and `open_release`. A Rust actor owns authoritative tasks, favorites, and settings. Queue revisions are separate, and the frontend rejects stale snapshots. IPC, directory selection, and clipboard writes use the typed service boundary.
+Additional commands are `browse_releases`, `preview_batch`, `create_batch`, `change_route`, `diagnose_routes`, `save_settings`, `reorder_queue`, `query_history`, `acknowledge_notices`, `hide_to_tray`, `add_favorite`, `remove_favorite`, `check_favorites`, `check_app_update`, `open_release`, and `open_update_link`. A Rust actor owns authoritative tasks, favorites, and settings. Queue revisions are separate, and the frontend rejects stale snapshots. IPC, directory selection, and clipboard writes use the typed service boundary.
 
 `diagnose_routes(url)` retains its interface, with Rust owning the default test URL. The actor owns the manual worker and reply channel, releases busy state on completion or failure, and cancels the worker on exit. Internal generations isolate manual and automatic display results without changing engine route selection. Snapshots add optional `diagnosticContext` with `source` (`default`, `input`, or `download`) and `filename`. Reports retain the existing `diagnostics` JSON storage without a schema change. Context is session-only, so restored reports are labeled historical.
 
@@ -440,7 +442,7 @@ cargo run --manifest-path src-tauri/Cargo.toml --example benchmark_routes -- "ht
 cargo run --manifest-path src-tauri/Cargo.toml --example verify_v2 -- "https://github.com/cli/cli" "artifacts/acceptance-v0.2.0/批量与迁移" "artifacts/acceptance/下载验证/verification.sqlite3"
 ```
 
-Use a fresh acceptance directory. The source database is opened read-only, and migration writes only to the copy. Test assets, browser screenshots, and build caches are excluded from source. Browser layout checks, Rust download checks, and native Windows interaction checks are recorded separately. Each Release describes the checks actually performed and remaining limitations.
+Use a fresh acceptance directory. The source database is opened read-only, and migration writes only to the copy. Test assets, browser screenshots, and build caches are excluded from source. Browser layout checks, Rust download checks, and native Windows interaction checks are recorded separately. Release notes describe user-facing changes, download and usage instructions, and limitations or compatibility information that affect users. Developer verification results, including test counts, build checks, acceptance procedures, and checks not performed, are kept separately in maintainer acceptance records and omitted from release notes.
 
 ## Known limitations
 

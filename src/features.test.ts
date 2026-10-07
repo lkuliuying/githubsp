@@ -93,9 +93,9 @@ describe('三批功能用户流程', () => {
     const favorite = { id: 'f', repository: 'test/repo', latest: { id: 1, tag: 'v1', url: 'page' }, lastChecked: 100, lastSuccess: 50, nextCheck: 200, error: '接口限流' }
     const wrapper = render(FavoritesView, { ready: true, favorites: [favorite] }); expect(wrapper.text()).toContain('最新正式版：v1'); expect(wrapper.text()).toContain('接口限流'); await click(wrapper, '查看版本'); expect(wrapper.emitted('browse')?.[0]).toEqual(['test/repo'])
   })
-  it('更新源未配置不伪报最新版，版本说明作为文本显示', async () => {
+  it('更新源未配置不伪报最新版，版本说明中的 HTML 保留为文本', async () => {
     vi.mocked(downloadsApi.checkUpdate).mockResolvedValue({ status: 'not_configured', current: '0.2.0', latest: null, notes: null, url: null, message: '尚未配置官方发布源', nextCheck: null })
     const wrapper = render(UpdateView, { ready: true }); await click(wrapper, '检查软件更新'); expect(wrapper.text()).toContain('尚未配置官方发布源'); expect(wrapper.text()).not.toContain('已是最新版'); expect(downloadsApi.openRelease).not.toHaveBeenCalled()
-    vi.mocked(downloadsApi.checkUpdate).mockResolvedValue({ status: 'available', current: '0.2.0', latest: 'v0.3.0', notes: '<script>unsafe</script>', url: 'https://github.com/test/repo/releases/tag/v0.3.0', message: '有新版本', nextCheck: null }); await click(wrapper, '检查软件更新'); expect(wrapper.find('script').exists()).toBe(false); expect(wrapper.get('pre').text()).toContain('<script>'); await click(wrapper, '打开官方'); expect(downloadsApi.openRelease).toHaveBeenCalledWith('https://github.com/test/repo/releases/tag/v0.3.0')
+    vi.mocked(downloadsApi.checkUpdate).mockResolvedValue({ status: 'available', current: '0.2.0', latest: 'v0.3.0', notes: '<script>unsafe</script>', url: 'https://github.com/test/repo/releases/tag/v0.3.0', message: '有新版本', nextCheck: null }); await click(wrapper, '检查软件更新'); expect(wrapper.find('script').exists()).toBe(false); expect(wrapper.get('.update-markdown__content').text()).toContain('<script>'); await click(wrapper, '打开官方'); expect(downloadsApi.openRelease).toHaveBeenCalledWith('https://github.com/test/repo/releases/tag/v0.3.0')
   })
 })

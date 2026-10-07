@@ -198,6 +198,24 @@ fn open_release(url: String) -> std::result::Result<(), String> {
 }
 
 #[tauri::command]
+fn open_update_link(url: String) -> std::result::Result<(), String> {
+    let url = crate::updates::validate_update_link(&url)?;
+    #[cfg(windows)]
+    {
+        std::process::Command::new("explorer.exe")
+            .arg(url.as_str())
+            .spawn()
+            .map_err(|error| format!("无法打开更新说明链接：{error}"))?;
+        Ok(())
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = url;
+        Err("打开更新说明链接仅支持 Windows".into())
+    }
+}
+
+#[tauri::command]
 async fn list_tasks(manager: State<'_, Manager>) -> std::result::Result<Snapshot, String> {
     manager.snapshot().await.map_err(|error| error.to_string())
 }
@@ -382,7 +400,8 @@ pub fn run() {
                 remove_favorite,
                 check_favorites,
                 check_app_update,
-                open_release
+                open_release,
+                open_update_link
             ];
             handler(invoke)
         })

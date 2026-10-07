@@ -8,6 +8,13 @@ vi.mock('@tauri-apps/plugin-dialog', () => ({ open: vi.fn() }))
 
 beforeEach(() => { vi.resetAllMocks() })
 
+it('更新正文链接使用独立 IPC，不扩大官方发布页接口', async () => {
+  const url = 'https://github.com/test/repo/compare/v1...v2'
+  vi.mocked(invoke).mockResolvedValue(undefined)
+  await downloadsApi.openUpdateLink(url)
+  expect(invoke).toHaveBeenCalledExactlyOnceWith('open_update_link', { url })
+})
+
 describe('系统目录选择边界', () => {
   it('校验初始目录和所选目录，返回规范化后的存在目录', async () => {
     vi.mocked(invoke).mockResolvedValueOnce({ directory: 'F:\\原目录', state: 'existing' })
