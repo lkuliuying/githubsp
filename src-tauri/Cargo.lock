@@ -1341,7 +1341,7 @@ dependencies = [
 
 [[package]]
 name = "githubsp"
-version = "0.2.2"
+version = "0.2.3"
 dependencies = [
  "dunce",
  "futures-util",

@@ -247,7 +247,7 @@ async function confirmAction() {
       <FavoritesView v-if="view === 'favorites'" :favorites="snapshot.favorites" :ready="ready" @snapshot="apply" @browse="browseFavorite" />
       <SettingsView v-if="view === 'settings'" :settings="snapshot.settings" :ready="ready" @snapshot="apply"><UpdateView :ready="ready" /></SettingsView>
     </main>
-    <footer class="app-footer"><span>GitHubSP <strong>v0.2.2</strong><i />简单 · 稳定 · 专注下载</span><span><PhClockCounterClockwise :size="15" />逐个下载 · 关闭时保存进度 · 重启后手动继续</span></footer>
+    <footer class="app-footer"><span>GitHubSP <strong>v0.2.3</strong><i />简单 · 稳定 · 专注下载</span><span><PhClockCounterClockwise :size="15" />逐个下载 · 关闭时保存进度 · 重启后手动继续</span></footer>
     <dialog ref="dialog" class="app-dialog" @close="cancelId = null">
       <h2>{{ confirmation === 'clear' ? '清空已完成的记录？' : '取消这个下载？' }}</h2>
       <p>{{ confirmation === 'clear' ? '仅移除已完成任务的记录，下载文件会保留在原目录。' : '将停止下载并删除该任务的临时分片。已完成的文件不受影响。' }}</p>
