@@ -6,7 +6,7 @@ import HistoryView from './components/HistoryView.vue'
 import FavoritesView from './components/FavoritesView.vue'
 import SettingsView from './components/SettingsView.vue'
 import RouteDiagnostics from './components/RouteDiagnostics.vue'
-import type { DownloadTask, Favorite, Snapshot } from './types'
+import type { CatalogPage, DownloadTask, Favorite, Snapshot } from './types'
 import { defaultSettings } from './types'
 import { downloadsApi } from './services/downloads'
 
@@ -21,6 +21,18 @@ const makeTask = (id: string, status: DownloadTask['status']): DownloadTask => (
   verification: 'pending', error: null, finalPath: null, createdAt: 1, revision: 1,
 })
 const makeSnapshot = (tasks: DownloadTask[] = []): Snapshot => ({ tasks, lastDirectory: 'F:\\下载', error: null, revision: 1, settings: defaultSettings(), queueRevision: 0, diagnostics: [], diagnosing: false, notices: [], favorites: [] })
+const makeCatalog = (page: number, hasMore = false): CatalogPage => ({
+  repository: 'test/repo', page, hasMore, selectedUrl: null,
+  releases: [{ id: page + 1, tag: `v${page + 1}`, name: '', prerelease: false, url: '', notes: '', assets: [
+    { id: page * 10 + 1, name: `page-${page}.exe`, size: 1024, url: `https://github.com/test/repo/releases/download/v${page + 1}/page-${page}.exe`, sha256: null, hints: ['Windows'] },
+  ] }],
+})
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  let reject!: (reason: unknown) => void
+  const promise = new Promise<T>((done, fail) => { resolve = done; reject = fail })
+  return { promise, resolve, reject }
+}
 const wrappers: ReturnType<typeof mount>[] = []
 function render(component: Parameters<typeof mount>[0], props: Record<string, unknown> = {}) {
   const wrapper = mount(component, { props: { ...(component === SourcePicker ? { prepareDirectory: async (directory: string) => directory.trim() } : {}), ...props }, attachTo: document.body }); wrappers.push(wrapper); return wrapper
@@ -106,6 +118,171 @@ describe('参考布局重构的交互回归', () => {
     await wrapper.get('.asset input').setValue(true)
     await click(wrapper, '预览所选')
     expect(downloadsApi.previewBatch).toHaveBeenCalledWith([first.url, second.url], 'F:\\下载')
+  })
+
+  it('首次查询复用标题栏状态位，等待时拒绝重复提交', async () => {
+    const request = deferred<CatalogPage>()
+    vi.mocked(downloadsApi.browse).mockReturnValue(request.promise)
+    const wrapper = render(SourcePicker, { directory: 'F:\\下载', ready: true })
+    const status = wrapper.get('.section-heading [role="status"]').element
+    expect(status.textContent).toBe('')
+    await wrapper.get('#repository-source').setValue('test/repo')
+    await wrapper.get('.source-search').trigger('submit')
+    expect(wrapper.get('.source-status').element).toBe(status)
+    expect(status.textContent).toContain('正在查找版本…')
+    expect(wrapper.get('.source-browser').attributes('aria-busy')).toBe('true')
+    expect(wrapper.get('#repository-source').attributes('disabled')).toBeDefined()
+    expect(wrapper.find('.source-feedback').exists()).toBe(false)
+    await wrapper.get('.source-search').trigger('submit')
+    expect(downloadsApi.browse).toHaveBeenCalledExactlyOnceWith('https://github.com/test/repo', 0, false)
+    request.resolve(makeCatalog(0)); await flushPromises()
+    expect(wrapper.get('.source-status').element).toBe(status)
+    expect(status.textContent).toBe('')
+    expect(wrapper.get('.source-browser').attributes('aria-busy')).toBe('false')
+    expect(wrapper.text()).toContain('浏览其他版本')
+  })
+
+  it('翻页等待保留列表、附件和选择，仅成功后更新页码并恢复控件', async () => {
+    const request = deferred<CatalogPage>()
+    vi.mocked(downloadsApi.browse).mockResolvedValueOnce(makeCatalog(1, true)).mockReturnValueOnce(request.promise)
+    const wrapper = render(SourcePicker, { directory: 'F:\\下载', ready: true })
+    await wrapper.get('#repository-source').setValue('test/repo'); await click(wrapper, '查找版本')
+    await wrapper.get('.asset input').setValue(true)
+    const releaseRow = wrapper.get('.source-release').element
+    const assetRow = wrapper.get('.asset').element
+    const status = wrapper.get('.source-status').element
+    const next = wrapper.get('[aria-label="下一页版本"]')
+    await next.trigger('click')
+    expect(wrapper.get('.source-status').element).toBe(status)
+    expect(status.textContent).toContain('正在加载第 2 页…')
+    expect(wrapper.get('.source-pagination').text()).toContain('第 1 页')
+    expect(wrapper.get('.source-release').element).toBe(releaseRow)
+    expect(wrapper.get('.asset').element).toBe(assetRow)
+    expect((wrapper.get('.asset input').element as HTMLInputElement).checked).toBe(true)
+    expect(wrapper.get('.source-selection').text()).toContain('已选 1 项')
+    expect(next.attributes('disabled')).toBeDefined()
+    expect(next.classes()).toContain('source-pending-control')
+    expect(wrapper.get('.source-selection button').classes()).toContain('source-pending-control')
+    await next.trigger('click'); await wrapper.get('.source-search').trigger('submit')
+    expect(downloadsApi.browse).toHaveBeenCalledTimes(2)
+    expect(downloadsApi.browse).toHaveBeenLastCalledWith('https://github.com/test/repo', 2, false)
+    request.resolve(makeCatalog(2)); await flushPromises()
+    expect(wrapper.get('.source-pagination').text()).toContain('第 2 页')
+    expect(wrapper.text()).toContain('page-2.exe')
+    expect(wrapper.text()).not.toContain('page-1.exe')
+    expect(wrapper.get('.source-selection').text()).toContain('已选 0 项')
+    expect(status.textContent).toBe('')
+    expect(wrapper.get('[aria-label="上一页版本"]').attributes('disabled')).toBeUndefined()
+    expect(next.attributes('disabled')).toBeDefined()
+    expect(next.classes()).not.toContain('source-pending-control')
+    expect(wrapper.find('.source-pending-control').exists()).toBe(false)
+  })
+
+  it('加载期间首页、空选择、空批量和不可用附件继续保持不可用状态', async () => {
+    const page = makeCatalog(1, true)
+    page.releases[0]!.assets.push({ ...page.releases[0]!.assets[0]!, id: 99, name: 'blocked.exe', url: 'https://github.com/test/repo/releases/download/v2/blocked.exe', unavailable: '文件名不可用' })
+    const request = deferred<CatalogPage>()
+    vi.mocked(downloadsApi.browse).mockResolvedValueOnce(page).mockReturnValueOnce(request.promise)
+    const wrapper = mount(SourcePicker, { props: { directory: 'F:\\下载', ready: true, prepareDirectory: async directory => directory }, attachTo: document.body }); wrappers.push(wrapper)
+    await wrapper.get('#repository-source').setValue('test/repo'); await click(wrapper, '查找版本')
+    await wrapper.get('[aria-label="下一页版本"]').trigger('click')
+    for (const selector of ['[aria-label="上一页版本"]', '.source-selection button', '.source-batch button', '[aria-label="选择 blocked.exe"]']) {
+      expect(wrapper.get(selector).attributes('disabled')).toBeDefined()
+      expect(wrapper.get(selector).classes()).not.toContain('source-pending-control')
+    }
+    await wrapper.setProps({ ready: false })
+    expect(wrapper.get('#repository-source').classes()).not.toContain('source-pending-control')
+    expect(wrapper.get('.source-search button').attributes('disabled')).toBeDefined()
+    expect(wrapper.get('.source-search button').classes()).not.toContain('source-pending-control')
+    request.resolve(makeCatalog(2)); await flushPromises()
+    expect(wrapper.get('.source-search button').attributes('disabled')).toBeDefined()
+  })
+
+  it('翻页失败保留原页和附件选择，恢复后可重试', async () => {
+    const request = deferred<CatalogPage>()
+    vi.mocked(downloadsApi.browse).mockResolvedValueOnce(makeCatalog(1, true)).mockReturnValueOnce(request.promise).mockResolvedValueOnce(makeCatalog(2))
+    const wrapper = render(SourcePicker, { directory: 'F:\\下载', ready: true })
+    await wrapper.get('#repository-source').setValue('test/repo'); await click(wrapper, '查找版本')
+    await wrapper.get('.asset input').setValue(true)
+    await wrapper.get('[aria-label="下一页版本"]').trigger('click')
+    request.reject('GitHub 官方接口请求超时'); await flushPromises()
+    expect(wrapper.get('[role="alert"]').text()).toContain('请求超时')
+    expect(wrapper.get('.source-status').text()).toBe('')
+    expect(wrapper.get('.source-browser').attributes('aria-busy')).toBe('false')
+    expect(wrapper.get('.source-pagination').text()).toContain('第 1 页')
+    expect(wrapper.text()).toContain('page-1.exe')
+    expect((wrapper.get('.asset input').element as HTMLInputElement).checked).toBe(true)
+    expect(wrapper.get('[aria-label="下一页版本"]').attributes('disabled')).toBeUndefined()
+    await wrapper.get('[aria-label="下一页版本"]').trigger('click'); await flushPromises()
+    expect(wrapper.find('[role="alert"]').exists()).toBe(false)
+    expect(wrapper.get('.source-pagination').text()).toContain('第 2 页')
+    expect(downloadsApi.browse).toHaveBeenCalledTimes(3)
+  })
+
+  it('过滤后空页仍能翻页，末页禁止继续请求', async () => {
+    vi.mocked(downloadsApi.browse)
+      .mockResolvedValueOnce(makeCatalog(1, true))
+      .mockResolvedValueOnce({ ...makeCatalog(2, true), releases: [] })
+      .mockResolvedValueOnce(makeCatalog(3))
+    const wrapper = render(SourcePicker, { directory: 'F:\\下载', ready: true })
+    await wrapper.get('#repository-source').setValue('test/repo'); await click(wrapper, '查找版本')
+    await wrapper.get('[aria-label="下一页版本"]').trigger('click'); await flushPromises()
+    expect(wrapper.text()).toContain('本页没有符合条件的版本')
+    expect(wrapper.get('.source-pagination').text()).toContain('第 2 页')
+    expect(wrapper.get('[aria-label="下一页版本"]').attributes('disabled')).toBeUndefined()
+    await wrapper.get('[aria-label="下一页版本"]').trigger('click'); await flushPromises()
+    expect(wrapper.text()).toContain('page-3.exe')
+    expect(wrapper.get('[aria-label="下一页版本"]').attributes('disabled')).toBeDefined()
+    await wrapper.get('[aria-label="下一页版本"]').trigger('click')
+    expect(downloadsApi.browse).toHaveBeenCalledTimes(3)
+  })
+
+  it('查询失效后不接受旧分页结果，并清除加载状态', async () => {
+    const request = deferred<CatalogPage>()
+    vi.mocked(downloadsApi.browse).mockResolvedValueOnce(makeCatalog(1, true)).mockReturnValueOnce(request.promise)
+    const wrapper = mount(SourcePicker, { props: { directory: 'F:\\下载', ready: true, prepareDirectory: async directory => directory }, attachTo: document.body }); wrappers.push(wrapper)
+    await wrapper.get('#repository-source').setValue('test/repo'); await click(wrapper, '查找版本')
+    await wrapper.get('[aria-label="下一页版本"]').trigger('click')
+    await wrapper.setProps({ directory: 'F:\\新目录' })
+    request.resolve(makeCatalog(2)); await flushPromises()
+    expect(wrapper.get('.source-pagination').text()).toContain('第 1 页')
+    expect(wrapper.text()).not.toContain('page-2.exe')
+    expect(wrapper.get('.source-status').text()).toBe('')
+    expect(wrapper.get('.source-browser').attributes('aria-busy')).toBe('false')
+  })
+
+  it.each(['成功', '失败'])('分页请求在卸载后%s不会影响新组件', async outcome => {
+    const request = deferred<CatalogPage>()
+    vi.mocked(downloadsApi.browse).mockReturnValueOnce(request.promise).mockResolvedValueOnce(makeCatalog(3))
+    const wrapper = render(SourcePicker, { directory: 'F:\\下载', ready: true })
+    await wrapper.get('#repository-source').setValue('test/repo'); await wrapper.get('.source-search').trigger('submit')
+    wrapper.unmount(); wrappers.splice(wrappers.indexOf(wrapper), 1)
+    const current = render(SourcePicker, { directory: 'F:\\下载', ready: true })
+    await current.get('#repository-source').setValue('test/repo'); await click(current, '查找版本')
+    if (outcome === '成功') request.resolve(makeCatalog(2))
+    else request.reject('旧请求超时')
+    await flushPromises()
+    expect(current.text()).toContain('page-3.exe')
+    expect(current.text()).not.toContain('page-2.exe')
+    expect(current.find('[role="alert"]').exists()).toBe(false)
+    expect(current.get('.source-status').text()).toBe('')
+    expect(wrapper.emitted('snapshot')).toBeUndefined()
+  })
+
+  it('批量预览共用固定状态位和通用处理文案', async () => {
+    const request = deferred<Awaited<ReturnType<typeof downloadsApi.previewBatch>>>()
+    vi.mocked(downloadsApi.previewBatch).mockReturnValue(request.promise)
+    const wrapper = render(SourcePicker, { directory: 'F:\\下载', ready: true })
+    await wrapper.get('#project-source').setValue('https://github.com/test/repo/releases/download/v1/app.exe')
+    const status = wrapper.get('.source-status').element
+    await click(wrapper, '预览批量')
+    expect(wrapper.get('.source-status').element).toBe(status)
+    expect(status.textContent).toContain('正在处理，请稍候…')
+    expect(wrapper.get('.source-batch button').attributes('disabled')).toBeDefined()
+    expect(wrapper.get('.source-batch button').classes()).toContain('source-pending-control')
+    request.reject('目录不可写'); await flushPromises()
+    expect(status.textContent).toBe('')
+    expect(wrapper.get('[role="alert"]').text()).toContain('目录不可写')
   })
 
   it('历史统计以当前页为范围，搜索和重置使用已有分页接口', async () => {

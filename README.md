@@ -71,6 +71,7 @@ https://github.com/{owner}/{repo}/releases/tag/{tag}
 四个页面沿用本地 `view` 状态切换，采用浅蓝背景、白色面板、绿色主操作和 Phosphor 图标，不新增路由或 UI 依赖。
 
 - **下载工作台**：顶部新建下载，宽窗口中间为版本/附件选择与线路检测双栏，底部为任务表格。任务的更多按钮展开来源、目录、换线及队列排序。全部继续只处理暂停/失败任务，全部暂停只处理活动/等待任务；批量操作遇到失败即停止并显示错误。清空已完成需要确认，仅移除记录。
+- **版本分页**：加载提示固定在附件面板标题栏右侧，空闲时保留占位。请求期间保留旧版本、附件和页码，成功后更新，失败保留原页并提示错误。临时等待的控件保持原有明暗且禁止重复操作；页码边界、无附件选择等原本不可用的控件仍灰显。加载提示出现或消失不推动面板和下载队列，不同页实际内容高度仍按现有布局变化。
 - **历史**：统一关键词搜索和状态筛选、统计卡、独立滚动的记录表格与页码跳转。匹配记录数来自服务端，其余统计只代表当前页；每页仍为 20 条。删除末页最后一条记录后回到有效页。
 - **收藏**：项目卡片和列表两种布局，可按检查结果筛选，按检查时间或项目名称排序。统计与标签使用真实的检查成功、失败、待检查状态，不推断“今日更新”或已安装版本。
 - **设置**：限速、窗口行为、收藏检查和软件更新分区。限速输入仍为 KiB/s，0 为不限速；滑块用于 0–100 MiB/s 的快捷调整，更高值通过输入框设置。恢复默认只修改表单，点击保存后才生效；收藏自动检查间隔仍固定为 6 小时。
@@ -177,7 +178,7 @@ cargo clippy --manifest-path src-tauri/Cargo.toml --locked --all-targets -- -D w
 cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
 ```
 
-Rust 测试使用本地可控 HTTP 服务覆盖 URL/路径、200/206/416、错误范围、不支持 Range、断流、超时、限流、不允许的重定向、HTML 页面、摘要不匹配、分段、队列、暂停/继续、活动取消、重启恢复、换线、文件锁和异常退出后的发布恢复。Vue 测试覆盖提交去重、目录错误、过期事件、重试及校验提示；`src/redesign.test.ts` 另覆盖批量操作失败/卸载中止、任务详情、版本切换、历史分页与统计、收藏筛选和设置草稿。测试使用隔离临时目录，不运行下载文件。
+Rust 测试使用本地可控 HTTP 服务覆盖 URL/路径、200/206/416、错误范围、不支持 Range、断流、超时、限流、不允许的重定向、HTML 页面、摘要不匹配、分段、队列、暂停/继续、活动取消、重启恢复、换线、文件锁和异常退出后的发布恢复。Vue 测试覆盖提交去重、目录错误、过期事件、重试及校验提示；`src/redesign.test.ts` 另覆盖批量操作失败/卸载中止、任务详情、版本切换、版本分页等待/去重/失败重试/空页/末页/过期返回、历史分页与统计、收藏筛选和设置草稿。分页加载的布局稳定性需另用浏览器检查，jsdom 不提供真实布局尺寸。测试使用隔离临时目录，不运行下载文件。
 
 真实网络验收可按需执行以下命令；完整下载会保存指定附件，测速每条线路取同一个 8 MiB 区间，三轮轮换顺序，每次最多等待 30 秒。
 
@@ -271,6 +272,7 @@ Private repositories, GitHub-generated source archives, Git clone, custom proxie
 The four pages use local `view` state without an additional router or UI dependency. Shared styles use a light-blue background, white panels, green primary actions, and Phosphor icons.
 
 - **Download workspace:** creation controls at the top, release/asset selection and diagnostics side by side on wide windows, then the task table. Task details expose source, directory, route, and queue controls. Resume-all handles paused/failed tasks; pause-all handles active/waiting tasks. Bulk actions stop and report the first error. Clearing completed records requires confirmation and preserves files.
+- **Release pagination:** loading feedback occupies a reserved slot on the right of the asset-panel heading, including while idle. Requests retain the previous releases, assets, and page number until success; failures keep that page and show an error. Temporarily locked controls retain their normal appearance while preventing duplicate actions; controls already unavailable because of page boundaries or empty selections remain subdued. Showing or hiding the loading indicator does not move the panel or task queue. Different page contents can still change height through the existing layout.
 - **History:** shared search and status filters, summary cards, an independently scrollable table, and page navigation. The matched count comes from the backend; other statistics cover only the current page. Pages contain 20 records. Removing the last record on the last page returns to a valid page.
 - **Favorites:** card/list layouts, result filters, and sorting by last check or repository name. Labels show actual successful, failed, or pending checks without inferring updates “today” or installed versions.
 - **Settings:** bandwidth, window behavior, favorite checks, and software updates. Limits remain in KiB/s with 0 for unlimited. The slider covers 0–100 MiB/s; higher limits use numeric entry. Restoring defaults changes the draft only until saved. Automatic favorite checks retain the fixed six-hour interval.
@@ -377,7 +379,7 @@ cargo clippy --manifest-path src-tauri/Cargo.toml --locked --all-targets -- -D w
 cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
 ```
 
-Rust tests use controlled local HTTP servers to cover URLs/paths, 200/206/416 responses, bad ranges, missing Range support, interrupted streams, timeouts, rate limits, rejected redirects, HTML, digest mismatch, segmentation, queues, pause/resume, active cancellation, restart recovery, route switching, file locks, and crash recovery during publication. Vue tests cover duplicate submission, directory errors, stale events, retries, and verification messages. `src/redesign.test.ts` also covers bulk failure/unmount interruption, task details, version switching, history pagination/statistics, favorite filters, and settings drafts. Tests use isolated temporary directories and never execute downloaded files.
+Rust tests use controlled local HTTP servers to cover URLs/paths, 200/206/416 responses, bad ranges, missing Range support, interrupted streams, timeouts, rate limits, rejected redirects, HTML, digest mismatch, segmentation, queues, pause/resume, active cancellation, restart recovery, route switching, file locks, and crash recovery during publication. Vue tests cover duplicate submission, directory errors, stale events, retries, and verification messages. `src/redesign.test.ts` also covers bulk failure/unmount interruption, task details, version switching, release-pagination loading/deduplication/retries/empty and final pages/stale responses, history pagination/statistics, favorite filters, and settings drafts. Pagination layout stability requires separate browser checks because jsdom does not provide real layout measurements. Tests use isolated temporary directories and never execute downloaded files.
 
 Optional live-network checks follow. Full downloads save the specified asset. The benchmark samples the same 8 MiB range on each route, rotates order over three rounds, and waits up to 30 seconds per request.
 
