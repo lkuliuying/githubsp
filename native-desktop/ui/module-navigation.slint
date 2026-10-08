@@ -1,0 +1,46 @@
+import { Updates } from "state.slint";
+import { ScrollView } from "std-widgets.slint";
+import { Theme, Panel, Label, Muted, Icon, ActionButton } from "theme.slint";
+
+export component ModuleNavigation inherits Panel {
+    in property <string> title;
+    in property <[string]> items;
+    in property <[image]> icons;
+    in property <int> selected;
+    callback select(int);
+    width: 164px;
+    background: #f6fbff;
+    VerticalLayout {
+        padding: 8px; spacing: 14px;
+        Label { text: root.title; height: 38px; font-size: 16px; font-weight: 650; }
+        ScrollView {
+            content-width: self.visible-width;
+            VerticalLayout {
+                spacing: 8px;
+                for item[index] in root.items: Rectangle {
+                    height: root.width < 150px ? 40px : 48px;
+                    if root.selected == index: Rectangle { width: 3px; height: parent.height - 16px; y: 8px; border-radius: 2px; background: Theme.green; }
+                    ActionButton { enabled: !Updates.dialog;
+                    text: item;
+                    icon: root.icons[index];
+                    show-icon: root.width >= 150px;
+                    leading: root.width >= 150px;
+                    compact: true;
+                    min-height: parent.height; max-height: parent.height;
+                    horizontal-stretch: 1;
+                    flat: true;
+                    soft: root.selected == index;
+                    weight: root.selected == index ? 650 : 400;
+                    clicked => { root.select(index); }
+                    }
+                }
+            }
+        }
+        if root.height > 500px && root.width > 150px: VerticalLayout {
+            min-height: 110px; max-height: 110px;
+            padding: 10px; spacing: 10px;
+            Icon { source: @image-url("../resources/icons/CloudArrowDown-regular.svg"); tint: #adcdeb; width: 46px; preferred-height: 46px; }
+            Muted { text: "让优秀的开源项目\n触手可及"; wrap: word-wrap; font-size: 12px; }
+        }
+    }
+}

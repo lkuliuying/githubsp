@@ -2,6 +2,8 @@ node_modules/
 dist/
 .cache/
 src-tauri/target/
+native-desktop/target/
+target/
 src-tauri/gen/
 artifacts/
 test-results/

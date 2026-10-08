@@ -1,0 +1,188 @@
+export struct TaskRow {
+    id: string, filename: string, state: string, tone: int, size: string,
+    progress: float, percent: string, speed: string, eta: string, route: string,
+    source-url: string, save-path: string, downloaded: string, elapsed: string,
+    failure: string, feedback: string, suggestion: string, suggestion-id: string,
+    resume: bool, pause: bool, cancel: bool, stopping: bool, completed: bool,
+    removable: bool, queued: bool, first: bool, last: bool,
+    repository: string, preferred-route: int, route-editable: bool,
+}
+export struct RouteRow { id: string, name: string, speed: string, state: string, detail: string, tone: int }
+export struct ReleaseRow { id: string, tag: string, detail: string }
+export struct AssetRow { url: string, name: string, size: string, detail: string, unavailable: bool, selected: bool }
+export struct PreviewRow { name: string, state: string, detail: string, task-id: string, tone: int }
+export struct HistoryRow { id: string, number: string, name: string, state: string, repository: string, tag: string, date: string, completed: string, path: string, file-state: string, tone: int, removable: bool }
+export struct FavoriteRow { repository: string, tag: string, state: string, tone: int, color-index: int, checked: string, error: string }
+export struct NoteTableRow { cells: [string], header: bool }
+export struct NoteBlock { content: styled-text, plain: string, kind: int, level: int, table: [NoteTableRow] }
+
+export global Workspace {
+    in-out property <int> page;
+    in-out property <int> download-section;
+    in-out property <int> creation-mode;
+    in property <int> view-revision;
+    in-out property <string> diagnostic-input;
+    in-out property <bool> busy;
+    in-out property <string> message;
+    in-out property <string> queue-message;
+    in-out property <string> url;
+    in-out property <string> directory;
+    in property <string> status;
+    in property <string> total-tasks;
+    in property <string> running-tasks;
+    in property <string> queued-tasks;
+    in property <string> recovering-tasks;
+    in property <string> notices;
+    in property <[TaskRow]> tasks;
+    in property <[RouteRow]> routes;
+    in property <string> route-target;
+    in property <string> route-result;
+    in property <string> route-best-name;
+    in property <string> route-best-speed;
+    in property <int> route-tone;
+    in property <bool> diagnosing;
+    in property <bool> can-pause;
+    in property <bool> can-resume;
+    in property <bool> can-clear;
+    in-out property <string> expanded-task;
+    callback navigate(int);
+    callback select-download-section(int);
+    callback select-creation-mode(int);
+    callback select-settings-section(int);
+    callback create();
+    callback pick-directory();
+    callback input-edited(bool);
+    callback task-action(string, string);
+    callback task-route(string, int);
+    callback batch(string);
+    callback diagnose();
+    callback acknowledge();
+    callback hide();
+    callback about();
+}
+
+export global Sources {
+    in-out property <string> repository;
+    in-out property <string> batch-input;
+    in-out property <bool> prerelease;
+    in property <bool> busy;
+    in property <string> message;
+    in property <[ReleaseRow]> releases;
+    in property <[AssetRow]> assets;
+    in property <string> selected-release;
+    in property <string> release-title: "版本附件";
+    in property <string> release-description: "选择版本后，附件会显示在这里";
+    in property <bool> loaded;
+    in property <int> page;
+    in property <bool> has-more;
+    in property <int> selected-count;
+    in property <string> selected-size: "0 B";
+    in property <bool> preview-visible;
+    in property <string> preview-summary;
+    in property <string> preview-space;
+    in property <[PreviewRow]> preview;
+    in property <bool> can-submit;
+    in-out property <int> route;
+    callback browse(int);
+    callback select-release(string);
+    callback select-asset(string, bool);
+    callback edited();
+    callback preview-batch(bool);
+    callback submit();
+    callback dismiss-preview();
+    callback favorite();
+}
+
+export global History {
+    in property <string> revision;
+    in-out property <string> query;
+    in-out property <int> filter;
+    in property <bool> busy;
+    in property <string> message;
+    in property <[HistoryRow]> rows;
+    in property <int> total;
+    in property <int> completed;
+    in property <int> failed;
+    in property <int> missing;
+    in property <int> page: 1;
+    in property <int> pages: 1;
+    in-out property <string> jump: "1";
+    callback load(int);
+    callback reset();
+    callback jump-to();
+}
+
+export global Favorites {
+    in-out property <string> input;
+    in-out property <int> filter;
+    in-out property <int> sort;
+    in-out property <bool> list;
+    in property <bool> busy;
+    in property <string> message;
+    in property <[FavoriteRow]> rows;
+    in property <int> total;
+    in property <int> successful;
+    in property <int> failed;
+    in property <int> pending;
+    in property <string> checked: "尚未检查";
+    callback add();
+    callback filter-changed();
+    callback action(string, string);
+}
+
+export global Preferences {
+    in-out property <bool> unlimited: true;
+    in-out property <int> section;
+    in-out property <string> limit: "0";
+    in-out property <float> slider;
+    in-out property <bool> close-to-tray;
+    in-out property <bool> completion: true;
+    in-out property <bool> auto-check;
+    in property <bool> busy;
+    in property <string> message;
+    in property <bool> saved;
+    callback edited();
+    callback slider-edited(float);
+    callback toggle-limit();
+    callback reset();
+    callback save();
+}
+
+export global Storage {
+    in property <string> directory;
+    in property <string> message;
+    in property <bool> busy;
+    callback open-directory();
+    callback export-backup();
+}
+
+export global Updates {
+    in property <bool> busy;
+    in property <string> latest;
+    in property <string> message: "点击“检查软件更新”，查看可用版本和更新说明。";
+    in property <string> checked: "尚未检查";
+    in property <bool> can-open;
+    in property <bool> available;
+    in property <[NoteBlock]> notes;
+    in property <bool> dialog;
+    in property <[string]> versions;
+    in-out property <int> selected;
+    in property <bool> has-more;
+    in property <bool> listing;
+    in property <int> stage;
+    in property <bool> downloadable;
+    in property <string> attachment;
+    in property <string> attachment-detail;
+    in property <string> dialog-message;
+    in property <string> duplicate-task;
+    in property <[NoteBlock]> selected-notes;
+    callback check();
+    callback show();
+    callback close();
+    callback load-more();
+    callback select(int);
+    callback download();
+    callback resume-duplicate();
+    callback official(bool);
+    callback open-link(string);
+}

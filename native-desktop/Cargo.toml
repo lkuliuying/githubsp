@@ -1,0 +1,26 @@
+[package]
+name = "githubsp-native"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "GitHubSP 原生桌面下载工作台"
+
+[dependencies]
+githubsp_lib = { package = "githubsp-core", path = "../core" }
+slint = { version = "=1.18.1", default-features = false, features = ["std", "backend-winit", "renderer-femtovg-wgpu", "compat-1-2", "accessibility", "unstable-winit-030", "unstable-wgpu-30"] }
+tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "macros"] }
+rfd = "=0.16.0"
+tray-icon = { version = "=0.24.1", default-features = false }
+image = { version = "0.25", default-features = false, features = ["png"] }
+serde_json = "1"
+sha2 = "0.10"
+pulldown-cmark = { version = "=0.13.4", default-features = false }
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_System_Threading", "Win32_System_LibraryLoader", "Win32_System_DataExchange", "Win32_System_Memory", "Win32_System_Time", "Win32_System_SystemInformation", "Win32_System_Com", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging", "Win32_Graphics_Gdi"] }
+
+[build-dependencies]
+slint-build = "=1.18.1"
+
+[dev-dependencies]
+tempfile = "3"
+i-slint-backend-testing = { version = "=1.18.1", features = ["renderer-software"] }

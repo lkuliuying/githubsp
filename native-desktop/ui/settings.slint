@@ -1,0 +1,328 @@
+import { ListView, ScrollView, ComboBox } from "std-widgets.slint";
+import { Theme, Panel, Heading, Input, ActionButton, Label, Muted, Badge, Message, Switch, Slider, Icon, SettingCard } from "theme.slint";
+import { Preferences, Storage, Updates, NoteBlock, Workspace } from "state.slint";
+import { ModuleNavigation } from "module-navigation.slint";
+
+export component NotesView inherits ScrollView {
+    in property <[NoteBlock]> blocks;
+    content-width: self.visible-width;
+    VerticalLayout {
+        spacing: 10px; padding: 2px;
+        for block in root.blocks: Rectangle {
+            min-height: block.kind == 3 ? table.preferred-height : block.kind == 2 ? code.preferred-height + 20px : rich.preferred-height + (block.kind == 4 ? 8px : 0px);
+            background: block.kind == 2 ? white : block.kind == 3 ? Theme.green-soft : transparent;
+            border-radius: 6px;
+            if block.kind == 4: Rectangle { width: 3px; background: #c9eddd; }
+            code := Text { visible: block.kind == 2; x: 10px; y: 10px; width: parent.width - 20px; text: block.plain; color: Theme.text; font-size: 11px; font-family: "Consolas"; wrap: word-wrap; }
+            table := VerticalLayout {
+                for row in block.table: Rectangle {
+                    min-height: cells.preferred-height; background: row.header ? Theme.green-soft : white;
+                    border-width: 1px; border-color: Theme.border;
+                    cells := HorizontalLayout {
+                        for cell in row.cells: Rectangle {
+                            min-height: value.preferred-height + 16px;
+                            value := Label { x: 8px; y: 8px; width: parent.width - 16px; text: cell; wrap: word-wrap; font-weight: row.header ? 600 : 400; }
+                        }
+                    }
+                }
+            }
+            rich := StyledText { visible: block.kind != 2 && block.kind != 3;
+                x: block.kind == 4 ? 12px : 0px; width: parent.width - self.x;
+                text: block.content;
+                default-font-size: block.kind == 1 ? (block.level == 1 ? 17px : block.level == 2 ? 15px : 14px) : 12px;
+                default-color: block.kind == 4 ? Theme.muted : Theme.text;
+                link-color: Theme.green-hover;
+                link-clicked(url) => { Updates.open-link(url); }
+            }
+        }
+    }
+}
+
+component FeatureExample inherits Rectangle {
+    in property <int> kind;
+    height: 160px;
+    border-radius: 10px; background: Theme.blue-soft;
+    VerticalLayout {
+        padding: 16px; spacing: 10px;
+        Muted { text: "功能示意"; font-size: 11px; }
+        Panel {
+            VerticalLayout {
+                padding: 12px; spacing: 8px;
+                HorizontalLayout {
+                    spacing: 8px;
+                    Icon { source: root.kind == 0 ? @image-url("../resources/icons/Monitor-regular.svg") : @image-url("../resources/icons/CloudArrowDown-fill.svg"); tint: Theme.green; }
+                    Label { text: "GitHubSP"; font-weight: 600; }
+                    Icon { source: root.kind == 0 ? @image-url("../resources/icons/Tray-regular.svg") : @image-url("../resources/icons/X-regular.svg"); width: 14px; preferred-height: 14px; }
+                }
+                Label { text: root.kind == 0 ? "收起到托盘，下载继续" : root.kind == 1 ? "下载完成" : "收藏项目发现新正式版"; font-weight: 600; }
+                Muted { text: root.kind == 0 ? "可从托盘重新打开主窗口" : root.kind == 1 ? "示例附件.zip · 8 秒后收起" : "在应用内提醒中查看版本详情"; font-size: 11px; wrap: word-wrap; }
+            }
+        }
+    }
+}
+
+component SpeedSettings inherits SettingCard {
+    title: "下载速度限制";
+    description: "为其他应用留出带宽，或充分利用当前网络。";
+    icon: @image-url("../resources/icons/DownloadSimple-regular.svg");
+    Rectangle {
+        height: 76px; background: Preferences.unlimited ? Theme.green-soft : Theme.subtle; border-radius: 10px;
+        HorizontalLayout {
+            padding: 16px; spacing: 16px;
+            VerticalLayout { spacing: 6px; Label { text: "不限速"; font-size: 15px; font-weight: 600; } Muted { text: "使用当前可用的下载速度"; } }
+            Switch { checked <=> Preferences.unlimited; enabled: !Updates.dialog && !Preferences.busy; accessible-label: "不限速"; toggled => { Preferences.toggle-limit(); } }
+        }
+    }
+    HorizontalLayout { Label { text: "自定义限速"; font-size: 15px; font-weight: 600; } Badge { width: 90px; text: Preferences.unlimited ? "当前不限速" : "自定义数值"; tone: Preferences.unlimited ? 0 : 1; } }
+    HorizontalLayout {
+        spacing: 12px; alignment: start;
+        Input { width: 154px; text <=> Preferences.limit; placeholder: "0"; enabled: !Updates.dialog && !Preferences.busy; edited => { Preferences.edited(); } }
+        Label { text: "MB/s"; horizontal-stretch: 0; }
+    }
+    Slider { minimum: 0; maximum: 100; value <=> Preferences.slider; accessible-label: "下载限速"; enabled: !Updates.dialog && !Preferences.busy; changed(value) => { Preferences.slider-edited(value); } }
+    HorizontalLayout { Muted { text: "0 · 不限速"; } Muted { text: "50"; horizontal-alignment: center; } Muted { text: "100 MB/s"; horizontal-alignment: right; } }
+    Message { text: "输入 0 表示不限速。滑块步长为 0.25 MB/s，更高的限制可直接输入，保存后生效。\n仅限制下载任务，两个分片共享额度；线路检测流量不受限速影响。"; }
+}
+
+component WindowSettings inherits VerticalLayout {
+    vertical-stretch: 0; spacing: 18px;
+    SettingCard {
+        title: "关闭窗口行为"; description: "让下载在后台继续。"; icon: @image-url("../resources/icons/Monitor-regular.svg");
+        Rectangle {
+            property <bool> stacked: self.width < 640px;
+            height: self.stacked ? tray-controls.preferred-height + 178px : max(tray-controls.preferred-height, 160px);
+            tray-controls := VerticalLayout {
+                x: 0px; y: 0px;
+                width: parent.stacked ? parent.width : (parent.width - 24px) * 0.52;
+                height: self.preferred-height; spacing: 18px;
+                HorizontalLayout {
+                    spacing: 12px;
+                    Label { text: "关闭窗口时收起到托盘"; font-weight: 600; wrap: word-wrap; }
+                    Switch { checked <=> Preferences.close-to-tray; enabled: !Updates.dialog && !Preferences.busy; accessible-label: "关闭窗口时收起到托盘"; toggled => { Preferences.edited(); } }
+                }
+                Muted { text: "开启后，关闭主窗口会保留后台下载。默认关闭窗口会保存进度并退出。"; wrap: word-wrap; }
+                Muted { text: "托盘菜单的“保存进度并退出”始终退出应用。"; wrap: word-wrap; font-size: 11px; }
+            }
+            tray-example := FeatureExample { kind: 0; x: parent.stacked ? 0px : tray-controls.width + 24px; y: parent.stacked ? tray-controls.height + 18px : 0px; width: parent.width - self.x; }
+        }
+    }
+    SettingCard {
+        title: "后台下载完成提醒"; description: "仅在主窗口不处于前台时提醒。"; icon: @image-url("../resources/icons/CheckCircle-regular.svg");
+        Rectangle {
+            property <bool> stacked: self.width < 640px;
+            height: self.stacked ? controls.preferred-height + 178px : max(controls.preferred-height, 160px);
+            controls := VerticalLayout {
+                x: 0px; y: 0px;
+                width: parent.stacked ? parent.width : (parent.width - 24px) * 0.52;
+                height: self.preferred-height; spacing: 18px;
+                HorizontalLayout {
+                    spacing: 12px;
+                    Label { text: "显示下载完成提醒"; font-weight: 600; }
+                    Switch { checked <=> Preferences.completion; enabled: !Updates.dialog && !Preferences.busy; accessible-label: "后台下载完成提醒"; toggled => { Preferences.edited(); } }
+                }
+                Muted { text: "主窗口失焦、最小化或收起到托盘时，显示独立的静音提醒窗。"; wrap: word-wrap; }
+                Muted { text: "通常 8 秒后收起，停留或操作期间暂停计时，连续完成会合并。不进入系统通知中心。"; wrap: word-wrap; font-size: 11px; }
+            }
+            notice-example := FeatureExample { kind: 1; x: parent.stacked ? 0px : controls.width + 24px; y: parent.stacked ? controls.height + 18px : 0px; width: parent.width - self.x; }
+        }
+    }
+}
+
+component FavoriteSettings inherits Rectangle {
+    property <bool> stacked: self.width < 860px;
+    vertical-stretch: 0;
+    min-height: self.stacked ? config.preferred-height + sample.preferred-height + 18px : max(config.preferred-height, sample.preferred-height);
+    config := SettingCard {
+        x: 0px; y: 0px;
+        width: root.stacked ? parent.width : (parent.width - 18px) * 0.6;
+        height: self.preferred-height;
+        title: "自动检查"; description: "关注应用内收藏项目的新正式版。"; icon: @image-url("../resources/icons/Star-regular.svg");
+        HorizontalLayout {
+            spacing: 12px;
+            Label { text: "自动检查收藏更新"; font-weight: 600; }
+            Switch { checked <=> Preferences.auto-check; enabled: !Updates.dialog && !Preferences.busy; accessible-label: "自动检查收藏更新"; toggled => { Preferences.edited(); } }
+        }
+        HorizontalLayout { Label { text: "检查间隔"; } Badge { width: 90px; text: "每 6 小时"; } }
+        HorizontalLayout { Label { text: "运行范围"; } Label { text: "在 GitHubSP 内收藏的项目"; horizontal-alignment: right; } }
+        Message { text: "应用运行期间按间隔检查，退出后停止。首次成功检查建立版本基线。\n不会创建后台服务或开机自启，也不会同步 GitHub 账号的收藏列表。"; }
+    }
+    sample := SettingCard {
+        x: root.stacked ? 0px : config.width + 18px; y: root.stacked ? config.height + 18px : 0px;
+        width: parent.width - self.x; height: self.preferred-height;
+        title: "更新提醒示意"; icon: @image-url("../resources/icons/Info-regular.svg");
+        FeatureExample { kind: 2; }
+        Muted { text: "发现新正式版时，在应用内生成提醒。可查看详情后选择下载。"; wrap: word-wrap; }
+    }
+}
+
+component DataSettings inherits VerticalLayout {
+    vertical-stretch: 0; spacing: 18px;
+    SettingCard {
+        title: "数据目录"; description: "保存历史、收藏与设置等应用记录。"; icon: @image-url("../resources/icons/FolderOpen-regular.svg");
+        Message { text: Storage.directory; }
+        HorizontalLayout { alignment: start; ActionButton { text: "打开数据目录"; icon: @image-url("../resources/icons/FolderOpen-regular.svg"); enabled: !Updates.dialog && !Storage.busy; clicked => { Storage.open-directory(); } } }
+    }
+    SettingCard {
+        title: "备份与导出"; description: "将应用记录导出为 SQLite 备份。"; icon: @image-url("../resources/icons/Package-regular.svg");
+        Muted { text: "只包含应用记录。下载文件与续传分片保留在原下载目录。升级前会自动备份，手动恢复前请退出所有版本。"; wrap: word-wrap; }
+        HorizontalLayout { alignment: start; ActionButton { text: Storage.busy ? "正在处理…" : "导出备份"; icon: @image-url("../resources/icons/ArrowLineUp-regular.svg"); primary: true; enabled: !Updates.dialog && !Storage.busy; clicked => { Storage.export-backup(); } } }
+    }
+    SettingCard {
+        title: "本次导出反馈"; icon: @image-url("../resources/icons/ClockCounterClockwise-regular.svg");
+        Message { text: Storage.message == "" ? "本次运行尚无导出结果。完成后将在这里显示实际结果与保存位置。" : Storage.message; }
+    }
+}
+
+component UpdateSettings inherits VerticalLayout {
+    vertical-stretch: 0; spacing: 18px;
+    SettingCard {
+        title: "GitHubSP"; description: "简单、稳定的 GitHub 资源下载工具"; icon: @image-url("../resources/icons/CloudArrowDown-fill.svg");
+        HorizontalLayout { Label { text: "当前版本"; font-weight: 600; horizontal-stretch: 0; } Badge { text: "v0.2.3"; } Rectangle { horizontal-stretch: 1; } if Updates.latest != "": Badge { text: Updates.latest; tone: 1; } }
+        Muted { text: "上次检查：" + Updates.checked; wrap: word-wrap; }
+        Message { text: Updates.message; success: Updates.available; }
+        HorizontalLayout {
+            spacing: 8px; alignment: start;
+            ActionButton { text: Updates.busy ? "正在检查…" : "检查软件更新"; icon: @image-url("../resources/icons/ArrowClockwise-regular.svg"); compact: true; primary: !Updates.available; enabled: !Updates.dialog && !Updates.busy; clicked => { Updates.check(); } }
+            if Updates.available: ActionButton { text: "下载新版"; icon: @image-url("../resources/icons/DownloadSimple-regular.svg"); compact: true; primary: true; enabled: !Updates.dialog && !Updates.busy; clicked => { Updates.show(); } }
+        }
+    }
+    SettingCard {
+        title: "更新说明"; icon: @image-url("../resources/icons/File-regular.svg");
+        if Updates.notes.length > 0: NotesView { blocks: Updates.notes; height: 230px; }
+        if Updates.notes.length == 0: Muted { text: "检查更新后，在这里查看版本说明。"; wrap: word-wrap; }
+    }
+    SettingCard {
+        title: "相关操作"; icon: @image-url("../resources/icons/Info-regular.svg");
+        Muted { text: "新版以免安装程序加入下载队列，下载后请自行启动。"; wrap: word-wrap; }
+        HorizontalLayout {
+            spacing: 10px; alignment: start;
+            ActionButton { text: "关于"; icon: @image-url("../resources/icons/Info-regular.svg"); compact: true; enabled: !Updates.dialog; clicked => { Workspace.about(); } }
+            ActionButton { text: "打开官方发布页"; icon: @image-url("../resources/icons/ArrowSquareOut-regular.svg"); compact: true; enabled: !Updates.dialog && Updates.can-open && !Updates.busy; clicked => { Updates.official(false); } }
+        }
+    }
+}
+
+export component SettingsPage inherits HorizontalLayout {
+    private property <int> section: Preferences.section;
+    changed section => { settings-scroll.content-y = 0px; }
+    spacing: self.width < 800px ? 10px : 16px;
+    ModuleNavigation {
+        width: root.width < 800px ? 128px : 196px;
+        title: "设置";
+        items: ["下载设置", "窗口与提醒", "收藏检查", "数据管理", "软件更新与关于"];
+        icons: [@image-url("../resources/icons/DownloadSimple-regular.svg"), @image-url("../resources/icons/Monitor-regular.svg"), @image-url("../resources/icons/Star-regular.svg"), @image-url("../resources/icons/Package-regular.svg"), @image-url("../resources/icons/Info-regular.svg")];
+        selected: Preferences.section;
+        select(index) => { Workspace.select-settings-section(index); }
+    }
+    Panel {
+        horizontal-stretch: 1;
+        background: #f8fbff;
+        VerticalLayout {
+            padding: root.width < 800px ? 12px : 24px; spacing: 14px;
+            VerticalLayout {
+                spacing: 6px;
+                Label {
+                text: Preferences.section == 0 ? "下载设置" : Preferences.section == 1 ? "窗口与提醒" : Preferences.section == 2 ? "收藏检查" : Preferences.section == 3 ? "数据管理" : "软件更新与关于";
+                font-size: root.width < 800px ? 22px : 26px; font-weight: 650;
+                }
+                Muted { text: Preferences.section == 0 ? "调整下载带宽，让任务适合当前网络。" : Preferences.section == 1 ? "设置窗口行为与后台提醒方式。" : Preferences.section == 2 ? "及时获知应用内收藏项目的新版本。" : Preferences.section == 3 ? "管理本地应用记录，导出备份。" : "了解当前版本，获取更新与开源信息。"; }
+            }
+            settings-scroll := ScrollView {
+                content-width: self.visible-width;
+                vertical-stretch: 1;
+                VerticalLayout {
+                    padding-right: 8px; spacing: 16px;
+                    if Preferences.section == 0: SpeedSettings {}
+                    if Preferences.section == 1: WindowSettings {}
+                    if Preferences.section == 2: FavoriteSettings {}
+                    if Preferences.section == 3: DataSettings {}
+                    if Preferences.section == 4: UpdateSettings {}
+                    Rectangle { vertical-stretch: 1; }
+                }
+            }
+            Rectangle { height: 1px; background: Theme.border; }
+            ScrollView {
+                height: root.width < 800px ? 30px : 24px;
+                content-width: self.visible-width;
+                VerticalLayout {
+                    Label { text: Preferences.message == "" ? "各模块修改统一保存后生效。" : Preferences.message; color: Preferences.saved ? Theme.green-hover : Theme.muted; wrap: word-wrap; }
+                }
+            }
+            HorizontalLayout {
+                spacing: 12px;
+                ActionButton { text: "恢复全部默认"; icon: @image-url("../resources/icons/ArrowCounterClockwise-regular.svg"); compact: root.height < 500px; enabled: !Updates.dialog && (!Preferences.busy); clicked => { Preferences.reset(); } }
+                Rectangle { horizontal-stretch: 1; }
+                ActionButton { text: Preferences.busy ? "保存中…" : "保存全部设置"; icon: @image-url("../resources/icons/CheckCircle-regular.svg"); compact: root.height < 500px; primary: true; enabled: !Updates.dialog && (!Preferences.busy); clicked => { Preferences.save(); } }
+            }
+        }
+    }
+}
+export component UpdateDialog inherits FocusScope {
+    init => { cancel-button.focus(); }
+    key-pressed(event) => {
+        if Updates.stage == 2 { return accept; }
+        if event.text == Key.Escape { Updates.close(); return accept; }
+        if event.text == Key.Tab {
+            if event.modifiers.shift {
+                if cancel-button.has-focus { if official-button.enabled { official-button.focus(); } }
+                else if official-button.has-focus { if duplicate-button.enabled { duplicate-button.focus(); } else if more-button.enabled { more-button.focus(); } else { versions.focus(); } }
+                else if duplicate-button.has-focus { if more-button.enabled { more-button.focus(); } else { versions.focus(); } }
+                else if more-button.has-focus { versions.focus(); }
+                else if download-button.has-focus { cancel-button.focus(); }
+                else { if download-button.enabled { download-button.focus(); } else { cancel-button.focus(); } }
+            } else {
+                if versions.has-focus { if more-button.enabled { more-button.focus(); } else if duplicate-button.enabled { duplicate-button.focus(); } else { official-button.focus(); } }
+                else if more-button.has-focus { if duplicate-button.enabled { duplicate-button.focus(); } else { official-button.focus(); } }
+                else if duplicate-button.has-focus { official-button.focus(); }
+                else if official-button.has-focus { cancel-button.focus(); }
+                else if cancel-button.has-focus { if download-button.enabled { download-button.focus(); } else if versions.enabled { versions.focus(); } }
+                else { if versions.enabled { versions.focus(); } else { cancel-button.focus(); } }
+            }
+            return accept;
+        }
+        return reject;
+    }
+    Rectangle { background: #263f635c; }
+    TouchArea {}
+    Panel {
+        width: min(parent.width - 32px, 760px);
+        height: min(parent.height - 32px, 680px);
+        x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2;
+        VerticalLayout {
+            padding: 24px; spacing: 16px;
+            Heading { title: "下载新版"; description: "选择版本并下载更新程序 · 当前 v0.2.3"; icon: @image-url("../resources/icons/DownloadSimple-regular.svg"); page: true; }
+            Rectangle { height: 1px; background: Theme.border; }
+            ScrollView {
+                content-width: self.visible-width;
+                vertical-stretch: 1;
+                VerticalLayout {
+                    spacing: 14px; padding-right: 8px;
+                    Label { text: "要下载的版本"; font-size: 13px; font-weight: 600; }
+                    HorizontalLayout { spacing: 10px; versions := ComboBox { model: Updates.versions; current-index: Updates.selected; enabled: !Updates.listing && Updates.stage == 0; selected => { Updates.select(self.current-index); } } more-button := ActionButton { collapsed: !Updates.has-more; text: Updates.listing ? "正在加载…" : "选择其他版本"; enabled: Updates.has-more && !Updates.listing && Updates.stage == 0; clicked => { Updates.load-more(); } } }
+                    Panel {
+                        background: Theme.subtle; min-height: attachment-content.preferred-height;
+                        attachment-content := HorizontalLayout {
+                            padding: 16px; spacing: 16px;
+                            Icon { source: @image-url("../resources/icons/Package-regular.svg"); width: 30px; preferred-height: 30px; tint: Updates.downloadable ? Theme.green : Theme.muted; }
+                            VerticalLayout { spacing: 8px; Label { text: Updates.attachment; font-size: 14px; font-weight: 600; wrap: word-wrap; } Muted { text: Updates.attachment-detail; wrap: word-wrap; } }
+                        }
+                    }
+                    Label { text: "所选版本更新说明"; font-size: 14px; font-weight: 600; }
+                    if Updates.selected-notes.length > 0: NotesView { blocks: Updates.selected-notes; height: 230px; }
+                    if Updates.selected-notes.length == 0: Muted { text: "此版本暂无更新说明。"; }
+                    if Updates.duplicate-task != "": Label { text: "发现相同版本的下载任务"; color: #b87400; font-weight: 600; }
+                    if Updates.dialog-message != "": Message { text: Updates.dialog-message; error: Updates.duplicate-task == ""; }
+                    duplicate-button := ActionButton { collapsed: Updates.duplicate-task == ""; text: "继续 / 重试原任务"; enabled: Updates.duplicate-task != "" && Updates.stage == 0; clicked => { Updates.resume-duplicate(); } }
+                }
+            }
+            Rectangle { height: 1px; background: Theme.border; }
+            HorizontalLayout {
+                spacing: 10px;
+                official-button := ActionButton { text: "官方发布页"; icon: @image-url("../resources/icons/ArrowSquareOut-regular.svg"); enabled: Updates.stage == 0; clicked => { Updates.official(true); } }
+                Rectangle { horizontal-stretch: 1; }
+                cancel-button := ActionButton { text: "取消"; enabled: Updates.stage != 2; clicked => { Updates.close(); } }
+                download-button := ActionButton { text: Updates.stage == 1 ? "选择目录中…" : Updates.stage == 2 ? "正在创建任务…" : "选择保存位置并下载"; primary: true; enabled: Updates.downloadable && Updates.stage == 0 && !Updates.listing; clicked => { Updates.download(); } }
+            }
+        }
+    }
+}

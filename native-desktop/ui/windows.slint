@@ -1,0 +1,98 @@
+import { ScrollView, AboutSlint } from "std-widgets.slint";
+import { Theme, Panel, Label, Muted, Icon, ActionButton, Badge } from "theme.slint";
+export component CompletionWindow inherits Window {
+    title: "GitHubSP · 下载完成";
+    width: 380px;
+    height: 170px;
+    no-frame: true;
+    always-on-top: true;
+    background: Theme.blue-soft;
+    default-font-family: "Noto Sans SC";
+    in property <string> message;
+    in property <string> detail;
+    callback dismiss();
+    callback open();
+    callback hover(bool);
+    out property <bool> hovering: area.has-hover;
+    changed hovering => { root.hover(root.hovering); }
+    Rectangle { x: 1px; y: 1px; width: parent.width - 2px; height: parent.height - 2px; background: white; border-width: 1px; border-color: Theme.border; border-radius: 12px; }
+    Rectangle { x: 1px; y: parent.height - 4px; height: 3px; width: parent.width - 2px; background: Theme.green; }
+    area := TouchArea {
+        VerticalLayout {
+            padding: 16px; spacing: 10px;
+            HorizontalLayout {
+                spacing: 8px;
+                Icon { source: @image-url("../resources/icons/CloudArrowDown-fill.svg"); tint: Theme.green; }
+                Label { text: "GitHubSP"; font-weight: 600; }
+                Muted { text: "后台完成提醒"; font-size: 11px; horizontal-alignment: right; }
+            }
+            Label { text: root.message; font-size: 17px; font-weight: 650; }
+            Muted { text: root.detail; font-size: 12px; }
+            HorizontalLayout {
+                spacing: 8px;
+                Muted { text: "8 秒后自动收起"; font-size: 11px; }
+                ActionButton { text: "查看下载"; compact: true; primary: true; clicked => { root.open(); } }
+                ActionButton { text: "关闭"; compact: true; clicked => { root.dismiss(); } }
+            }
+        }
+    }
+}
+
+export component AboutWindow inherits Window {
+    title: "关于 GitHubSP";
+    preferred-width: 660px;
+    preferred-height: 520px;
+    min-width: 480px;
+    min-height: 360px;
+    background: Theme.blue-soft;
+    default-font-family: "Noto Sans SC";
+    in property <string> licenses;
+    in property <int> license-index: 0;
+    in property <int> license-count: 1;
+    callback license-page(int);
+    callback dismiss();
+    changed license-index => { license-scroll.content-y = 0px; }
+    VerticalLayout {
+        padding: 18px;
+        spacing: 12px;
+        HorizontalLayout {
+            height: 76px; spacing: 18px;
+            Rectangle { width: 76px; border-radius: 16px; background: Theme.green;
+                Icon { source: @image-url("../resources/icons/CloudArrowDown-fill.svg"); tint: white; width: 38px; preferred-height: 38px; x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2; }
+            }
+            VerticalLayout { spacing: 6px;
+                Label { text: "GitHubSP"; font-size: 25px; font-weight: 700; }
+                Muted { text: "更快的 GitHub · 为开发者加速"; }
+                Muted { text: "让优秀的开源项目触手可及。"; font-size: 11px; }
+            }
+        }
+        HorizontalLayout {
+            height: 62px; spacing: 10px;
+            for item in [{title: "当前版本", value: "v0.2.3"}, {title: "技术栈", value: "Rust + Slint"}, {title: "开源许可", value: "MIT License"}]: Panel {
+                VerticalLayout { padding: 12px; spacing: 5px; Muted { text: item.title; font-size: 11px; } Label { text: item.value; font-size: 13px; font-weight: 600; } }
+            }
+        }
+        Panel {
+            vertical-stretch: 1;
+            VerticalLayout {
+                padding: 12px; spacing: 8px;
+                HorizontalLayout { Label { text: "开源与第三方许可声明"; font-weight: 600; } Badge { text: (root.license-index + 1) + " / " + root.license-count; } }
+                Rectangle { height: 1px; background: Theme.border; }
+                license-scroll := ScrollView {
+                    content-width: self.visible-width;
+                    VerticalLayout { spacing: 14px; padding-right: 6px;
+                        AboutSlint {}
+                        Label { text: root.licenses; wrap: word-wrap; vertical-alignment: top; font-size: 11px; }
+                    }
+                }
+            }
+        }
+        HorizontalLayout {
+            spacing: 10px;
+            ActionButton { text: "上一页"; compact: true; enabled: root.license-index > 0; clicked => { root.license-page(root.license-index - 1); } }
+            ActionButton { text: "下一页"; compact: true; enabled: root.license-index + 1 < root.license-count; clicked => { root.license-page(root.license-index + 1); } }
+            Rectangle { horizontal-stretch: 1; }
+            ActionButton { text: "关闭"; compact: true; primary: true; clicked => { root.dismiss(); } }
+        }
+    }
+}

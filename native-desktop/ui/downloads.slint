@@ -1,0 +1,512 @@
+import { ListView, ScrollView, ComboBox, TextEdit } from "std-widgets.slint";
+import { Theme, Panel, ActionButton, Input, Label, Muted, Icon, EmptyState, Message, Badge, CheckBox, Stat } from "theme.slint";
+import { ModuleNavigation } from "module-navigation.slint";
+import { Workspace, Sources, TaskRow, Updates } from "state.slint";
+
+component ReleaseList inherits Panel {
+    VerticalLayout {
+        spacing: 0px;
+        Rectangle {
+            height: 40px;
+            HorizontalLayout {
+                padding-left: 12px; padding-right: 8px; spacing: 5px;
+                Label { text: "版本列表"; font-weight: 600; }
+                if Sources.loaded && Sources.page == 0: ActionButton { enabled: !Updates.dialog; text: "更多版本"; help: "浏览其他版本"; compact: true; flat: true; pending: Sources.busy; clicked => { Sources.browse(1); } }
+                if Sources.page > 0: ActionButton { icon: @image-url("../resources/icons/CaretLeft-regular.svg"); help: "上一页版本"; compact: true; flat: true; pending: Sources.busy; enabled: !Updates.dialog && Sources.page > 1; clicked => { Sources.browse(Sources.page - 1); } }
+                if Sources.page > 0: Muted { text: "第 " + Sources.page + " 页"; horizontal-stretch: 0; }
+                if Sources.page > 0: ActionButton { icon: @image-url("../resources/icons/CaretRight-regular.svg"); help: "下一页版本"; compact: true; flat: true; pending: Sources.busy; enabled: !Updates.dialog && Sources.has-more; clicked => { Sources.browse(Sources.page + 1); } }
+            }
+        }
+        Rectangle { height: 1px; background: Theme.border; }
+        if !Sources.loaded: EmptyState { description: "查找项目后查看可下载的版本"; icon: @image-url("../resources/icons/Package-regular.svg"); }
+        if Sources.loaded && Sources.releases.length == 0: EmptyState { description: "本页没有符合条件的版本，可翻页或显示预发布。"; }
+        if Sources.releases.length > 0: ListView {
+            for release in Sources.releases: Rectangle {
+                height: 44px;
+                background: release.id == Sources.selected-release ? Theme.green-soft : release-touch.has-hover ? Theme.subtle : transparent;
+                HorizontalLayout {
+                    padding: 10px; spacing: 9px;
+                    Icon { source: @image-url("../resources/icons/Package-regular.svg"); tint: release.id == Sources.selected-release ? Theme.green : Theme.muted; }
+                    VerticalLayout { spacing: 3px; Label { text: release.tag; font-weight: 600; } Muted { text: release.detail; font-size: 11px; } }
+                    Icon { source: @image-url("../resources/icons/CaretRight-regular.svg"); width: 15px; preferred-height: 15px; }
+                }
+                release-touch := TouchArea { enabled: !Updates.dialog && (!Sources.busy); clicked => { Sources.select-release(release.id); } }
+            }
+        }
+        if Sources.loaded: Rectangle {
+            height: 54px; background: Theme.blue-soft;
+            VerticalLayout {
+                padding: 10px; spacing: 3px;
+                Label { text: Sources.release-title; font-weight: 600; }
+                Muted { text: Sources.release-description; font-size: 10px; }
+            }
+        }
+    }
+}
+
+component AssetList inherits Panel {
+    VerticalLayout {
+        spacing: 0px;
+        Rectangle {
+            height: 40px;
+            HorizontalLayout {
+                padding-left: 12px; padding-right: 10px; spacing: 8px;
+                Label { text: "附件列表"; font-weight: 600; }
+                CheckBox { text: "显示预发布"; checked <=> Sources.prerelease; enabled: !Updates.dialog; pending: Sources.busy; toggled => { if Sources.loaded { Sources.browse(1); } } }
+            }
+        }
+        Rectangle {
+            background: Theme.subtle; height: 33px;
+            HorizontalLayout { padding-left: 12px; padding-right: 12px; spacing: 10px; Label { text: "选择"; width: 24px; } Label { text: "附件文件名"; } Label { text: "大小"; width: 70px; horizontal-alignment: right; } }
+        }
+        if Sources.assets.length == 0: EmptyState { description: Sources.loaded ? "此版本没有可下载附件" : "暂无附件，请先查找项目"; icon: @image-url("../resources/icons/Files-regular.svg"); }
+        if Sources.assets.length > 0: ListView {
+            for asset in Sources.assets: Rectangle {
+                height: 50px;
+                background: asset.selected ? Theme.green-soft : transparent;
+                Rectangle { y: parent.height - 1px; height: 1px; background: Theme.border; }
+                HorizontalLayout {
+                    padding-left: 12px; padding-right: 12px; spacing: 10px;
+                    CheckBox { height: parent.height; checked: asset.selected; pending: Sources.busy; enabled: !Updates.dialog && (!asset.unavailable && (asset.selected || Sources.selected-count < 100)); accessible-label: "选择 " + asset.name; toggled => { Sources.select-asset(asset.url, self.checked); } }
+                    Icon { source: @image-url("../resources/icons/File-regular.svg"); width: 17px; tint: asset.unavailable ? Theme.muted : Theme.text; }
+                    VerticalLayout { horizontal-stretch: 1; spacing: 3px; Label { text: asset.name; } Muted { text: asset.detail; font-size: 10px; color: asset.unavailable ? Theme.red : Theme.muted; } }
+                    Label { text: asset.size; font-size: 11px; width: 68px; horizontal-alignment: right; }
+                }
+            }
+        }
+    }
+}
+
+component SourceBrowser inherits VerticalLayout {
+    in property <length> list-height: 250px;
+    spacing: 10px;
+    HorizontalLayout {
+        height: 42px; spacing: 8px;
+        Label { text: "仓库地址"; width: 66px; font-weight: 600; }
+        Input { text <=> Sources.repository; placeholder: "owner/repo 或 GitHub 仓库链接"; enabled: !Updates.dialog; pending: Sources.busy; edited => { Sources.edited(); } accepted => { Sources.browse(0); } }
+        ActionButton { text: "查找版本"; primary: true; pending: Sources.busy; enabled: !Updates.dialog && (Sources.repository != ""); clicked => { Sources.browse(0); } }
+    }
+    HorizontalLayout {
+        height: 24px; spacing: 8px;
+        Muted { text: "支持 GitHub 仓库链接或 owner/repo；每批最多 100 个附件。"; font-size: 11px; }
+        if Sources.loaded: ActionButton { enabled: !Updates.dialog; icon: @image-url("../resources/icons/Star-regular.svg"); help: "收藏项目"; flat: true; compact: true; pending: Sources.busy; clicked => { Sources.favorite(); } }
+    }
+    Rectangle {
+        property <bool> stacked: self.width < 660px;
+        height: self.stacked ? 478px : root.list-height;
+        versions := ReleaseList { x: 0px; y: 0px; width: parent.stacked ? parent.width : (parent.width - 12px) * 0.36; height: parent.stacked ? 208px : parent.height; }
+        assets := AssetList { x: parent.stacked ? 0px : versions.width + 12px; y: parent.stacked ? versions.height + 12px : 0px; width: parent.width - self.x; height: parent.stacked ? 258px : parent.height; }
+    }
+}
+
+component NewDownloadPanel inherits Panel {
+    private property <int> mode: Workspace.creation-mode;
+    private property <bool> previewing: Sources.preview-visible;
+    changed mode => { new-scroll.content-y = 0px; }
+    changed previewing => { new-scroll.content-y = 0px; }
+    VerticalLayout {
+        padding: root.width < 600px ? 12px : 20px; spacing: root.height < 440px ? 8px : 12px;
+        HorizontalLayout {
+            Label { text: Sources.preview-visible ? "确认下载任务" : "新建下载"; font-size: root.width < 600px ? 20px : 24px; font-weight: 650; }
+            Rectangle { width: 134px; height: 28px; if Sources.busy || Workspace.busy: Muted { text: "正在处理，请稍候…"; horizontal-alignment: right; } }
+        }
+        if !Sources.preview-visible && root.height >= 440px: Muted { text: "选择下载资源，预览并确认所需附件。"; }
+        if !Sources.preview-visible: HorizontalLayout {
+            spacing: 8px; alignment: start;
+            for title[index] in ["直链下载", "仓库附件", "批量链接"]: ActionButton { enabled: !Updates.dialog;
+                text: title; compact: true; soft: Workspace.creation-mode == index;
+                icon: index == 0 ? @image-url("../resources/icons/Link-regular.svg") : index == 1 ? @image-url("../resources/icons/Package-regular.svg") : @image-url("../resources/icons/ListBullets-regular.svg");
+                clicked => { Workspace.select-creation-mode(index); }
+            }
+        }
+        new-scroll := ScrollView {
+            content-width: self.visible-width;
+            vertical-stretch: 1;
+            VerticalLayout {
+                spacing: 14px; padding-right: 4px;
+                alignment: start;
+                if Sources.message != "": VerticalLayout {
+                    spacing: 6px;
+                    Message { text: Sources.message; }
+                    HorizontalLayout { alignment: start; ActionButton { enabled: !Updates.dialog; text: "查看队列"; compact: true; clicked => { Workspace.select-download-section(0); } } }
+                }
+                if !Sources.preview-visible: VerticalLayout {
+                    spacing: 12px;
+                    if Workspace.creation-mode == 0: VerticalLayout {
+                        spacing: 12px;
+                        Label { text: "GitHub 链接"; font-weight: 600; }
+                        Input { height: 42px; text <=> Workspace.url; placeholder: "粘贴 Release 附件直链或仓库地址"; enabled: !Updates.dialog && (!Workspace.busy); edited => { Workspace.input-edited(false); } accepted => { Workspace.create(); } }
+                        Muted { text: "附件直链可直接添加；仓库或版本地址会转到附件选择。"; wrap: word-wrap; }
+                    }
+                    if Workspace.creation-mode == 1: SourceBrowser { list-height: max(232px, min(360px, new-scroll.visible-height - 142px)); }
+                    if Workspace.creation-mode == 2: VerticalLayout {
+                        spacing: 12px;
+                        Label { text: "附件直链，每行一个"; font-weight: 600; }
+                        TextEdit { text <=> Sources.batch-input; placeholder-text: "在此粘贴多个附件直链，每行一个…"; height: 200px; enabled: !Updates.dialog && (!Sources.busy); edited => { Sources.edited(); } }
+                    }
+                    directory-row := HorizontalLayout {
+                        height: 42px; spacing: 8px;
+                        Label { text: "保存目录"; width: 66px; font-weight: 600; }
+                        Input { text <=> Workspace.directory; placeholder: "输入或选择保存目录"; enabled: !Updates.dialog && (!Workspace.busy && !Sources.busy); edited => { Workspace.input-edited(true); } }
+                        ActionButton { text: "浏览"; icon: @image-url("../resources/icons/FolderOpen-regular.svg"); enabled: !Updates.dialog && (!Workspace.busy && !Sources.busy); clicked => { Workspace.pick-directory(); } }
+                    }
+                    if Workspace.creation-mode == 2: Muted { text: "每批最多 100 项，预览后确认创建。"; wrap: word-wrap; }
+                }
+                if Sources.preview-visible: VerticalLayout {
+                    spacing: 12px;
+                    Message { text: Sources.preview-summary; success: Sources.can-submit; }
+                    Message { text: Sources.preview-space; }
+                    ListView {
+                        height: 240px;
+                        for item in Sources.preview: Rectangle {
+                            height: preview-row.preferred-height;
+                            preview-row := VerticalLayout {
+                                padding: 8px; spacing: 6px;
+                                HorizontalLayout { spacing: 8px; Badge { text: item.state; tone: item.tone; } Label { text: item.name; } }
+                                if item.detail != "": Muted { text: item.detail; wrap: word-wrap; }
+                                if item.task-id != "": HorizontalLayout { alignment: start; ActionButton { text: "继续原任务"; compact: true; enabled: !Updates.dialog && (!Workspace.busy); clicked => { Workspace.task-action(item.task-id, "resume"); } } }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Rectangle { height: 1px; background: Theme.border; }
+        if !Sources.preview-visible: HorizontalLayout {
+            spacing: 8px;
+            Muted { text: Workspace.creation-mode == 1 ? "已选 " + Sources.selected-count + " 个附件 · " + Sources.selected-size : "开始下载时自动检测可用线路"; font-size: 11px; }
+            if Workspace.creation-mode == 0: ActionButton { text: Workspace.busy ? "正在处理…" : "添加下载任务"; primary: true; enabled: !Updates.dialog && (!Workspace.busy && Workspace.url != "" && Workspace.directory != ""); clicked => { Workspace.create(); } }
+            if Workspace.creation-mode == 1: ActionButton { text: "预览所选附件"; primary: true; pending: Sources.busy; enabled: !Updates.dialog && (!Workspace.busy && Sources.selected-count > 0 && Workspace.directory != ""); clicked => { Sources.preview-batch(true); } }
+            if Workspace.creation-mode == 2: ActionButton { text: "预览批量链接"; primary: true; pending: Sources.busy; enabled: !Updates.dialog && (!Workspace.busy && Sources.batch-input != "" && Workspace.directory != ""); clicked => { Sources.preview-batch(false); } }
+        }
+        if Sources.preview-visible: VerticalLayout {
+            spacing: 8px;
+            HorizontalLayout {
+                spacing: 8px; alignment: start;
+                Label { text: "下载线路"; horizontal-stretch: 0; }
+                ComboBox { model: ["自动选择", "GitHub 直连", "GH-Proxy", "ghproxy.net"]; current-index <=> Sources.route; enabled: !Updates.dialog && (!Sources.busy); }
+            }
+            HorizontalLayout {
+                spacing: 8px; alignment: end;
+                ActionButton { enabled: !Updates.dialog; text: "返回修改"; compact: true; pending: Sources.busy; clicked => { Sources.dismiss-preview(); } }
+                ActionButton { text: "确认创建有效任务"; icon: @image-url("../resources/icons/CheckCircle-regular.svg"); primary: true; compact: true; pending: Sources.busy; enabled: !Updates.dialog && (!Workspace.busy && Sources.can-submit); clicked => { Sources.submit(); } }
+            }
+        }
+    }
+}
+
+component RouteSummary inherits VerticalLayout {
+    spacing: 16px; alignment: start;
+    Rectangle {
+        height: summary-content.preferred-height;
+        border-radius: 10px;
+        background: Workspace.route-tone == 1 ? Theme.green-soft : Workspace.route-tone == 2 ? #fff0f3 : Theme.subtle;
+        summary-content := VerticalLayout {
+            padding: 16px; spacing: 12px;
+            HorizontalLayout {
+                spacing: 8px;
+                Icon { source: @image-url("../resources/icons/Broadcast-regular.svg"); tint: Workspace.route-tone == 2 ? Theme.red : Theme.green; }
+                Label { text: Workspace.route-tone == 1 ? "最近检测最快" : Workspace.diagnosing ? "正在检测" : Workspace.route-tone == 2 ? "暂无线路可用" : "等待检测"; font-size: 14px; font-weight: 600; }
+            }
+            if Workspace.route-best-name != "": Label { text: Workspace.route-best-name; font-size: 14px; font-weight: 600; }
+            if Workspace.route-best-speed != "": Label { text: Workspace.route-best-speed; font-size: 24px; font-weight: 650; color: Theme.green-hover; }
+            Muted { text: Workspace.route-result; wrap: word-wrap; font-size: 11px; }
+        }
+    }
+    Rectangle {
+        height: info-content.preferred-height; border-radius: 10px; background: Theme.blue-soft;
+        info-content := VerticalLayout {
+            padding: 16px; spacing: 12px;
+            HorizontalLayout { spacing: 8px; Icon { source: @image-url("../resources/icons/Info-regular.svg"); tint: #2782d8; } Label { text: "检测说明"; font-weight: 600; } }
+            Muted { text: "结果仅供参考，不会切换正在下载的线路。"; wrap: word-wrap; }
+            Muted { text: "地址留空使用默认附件；下载期间也可检测。"; wrap: word-wrap; }
+            Muted { text: "每条线路最多约 524 KB / 10 秒，不保存文件。检测流量不受下载限速影响。"; wrap: word-wrap; }
+            if Workspace.route-target != "": VerticalLayout {
+                spacing: 10px;
+                Rectangle { height: 1px; background: Theme.border; }
+                Muted { text: Workspace.route-target; wrap: word-wrap; font-size: 11px; }
+            }
+        }
+    }
+}
+
+component RoutePanel inherits Panel {
+    private property <length> inset: root.width < 600px ? 12px : 20px;
+    private property <bool> wide: root.width - 2 * root.inset >= 720px;
+    private property <length> sidebar-width: min(280px, (root.width - 2 * root.inset) * 0.3);
+    primary := VerticalLayout {
+        x: root.inset; y: root.inset;
+        width: root.width - 2 * root.inset - (root.wide ? root.sidebar-width + 24px : 0px);
+        height: root.height - 2 * root.inset;
+        spacing: 14px;
+        VerticalLayout {
+            spacing: 5px;
+            Label { text: "线路检测"; font-size: root.width < 600px ? 20px : 24px; font-weight: 650; }
+            Muted { text: "比较当前线路的可用性与速度"; }
+        }
+        HorizontalLayout {
+            height: 42px; spacing: 8px;
+            Input { text <=> Workspace.diagnostic-input; icon: @image-url("../resources/icons/Link-regular.svg"); placeholder: "检测地址（可留空，使用默认附件）"; enabled: !Updates.dialog && !Workspace.diagnosing; accepted => { Workspace.diagnose(); } }
+            ActionButton { text: Workspace.diagnosing ? "检测中" : "检测线路"; icon: @image-url("../resources/icons/Play-fill.svg"); primary: true; enabled: !Updates.dialog && !Workspace.diagnosing && !Workspace.busy; clicked => { Workspace.diagnose(); } }
+        }
+        route-scroll := ScrollView {
+            content-width: self.visible-width; vertical-stretch: 1;
+            VerticalLayout {
+                padding-right: 4px; spacing: 0px; alignment: start;
+                Rectangle {
+                    height: 34px; background: Theme.subtle;
+                    HorizontalLayout {
+                        padding-left: 10px; padding-right: 10px; spacing: 10px;
+                        Label { text: "线路"; width: (primary.width - 48px) * 0.39; }
+                        Label { text: "下载速度"; width: (primary.width - 48px) * 0.28; }
+                        Label { text: "状态"; }
+                    }
+                }
+                for route in Workspace.routes: Rectangle {
+                    height: max(90px, route-content.preferred-height);
+                    Rectangle { y: parent.height - 1px; height: 1px; background: Theme.border; }
+                    route-content := HorizontalLayout {
+                        padding-left: 10px; padding-right: 10px; padding-top: 16px; padding-bottom: 16px; spacing: 10px;
+                        HorizontalLayout {
+                            width: (primary.width - 48px) * 0.39; spacing: 10px;
+                            Rectangle {
+                                width: 34px; height: 34px; border-radius: 17px; border-width: 1px; border-color: Theme.border;
+                                Icon { x: 7px; y: 7px; width: 20px; height: 20px; tint: Theme.text; source: route.id == "github" ? @image-url("../resources/icons/CloudArrowDown-regular.svg") : route.id == "gh-proxy" ? @image-url("../resources/icons/Broadcast-regular.svg") : @image-url("../resources/icons/Link-regular.svg"); }
+                            }
+                            VerticalLayout {
+                                spacing: 5px; alignment: center;
+                                Label { text: route.name; font-size: 13px; font-weight: 600; }
+                                Muted { text: route.id == "github" ? "官方直连" : "公共加速线路"; font-size: 10px; }
+                            }
+                        }
+                        Label { text: route.speed; width: (primary.width - 48px) * 0.28; font-size: 18px; font-weight: 600; color: route.name == Workspace.route-best-name ? Theme.green-hover : Theme.text; }
+                        VerticalLayout {
+                            spacing: 6px; alignment: center;
+                            HorizontalLayout {
+                                spacing: 5px;
+                                Icon { width: 16px; tint: route.tone == 1 ? Theme.green : route.tone == 2 ? Theme.red : Theme.muted; source: route.tone == 1 ? @image-url("../resources/icons/CheckCircle-fill.svg") : route.tone == 2 ? @image-url("../resources/icons/XCircle-regular.svg") : @image-url("../resources/icons/ClockCounterClockwise-regular.svg"); }
+                                Label { text: route.state; color: route.tone == 1 ? Theme.green-hover : route.tone == 2 ? Theme.red : Theme.muted; }
+                            }
+                            if route.detail != "": Muted { text: route.detail; wrap: word-wrap; font-size: 11px; }
+                        }
+                    }
+                }
+                if !root.wide: Rectangle { height: 18px; }
+                if !root.wide: RouteSummary {}
+            }
+        }
+    }
+    if root.wide: Rectangle { x: primary.x + primary.width + 12px; y: root.inset; width: 1px; height: root.height - 2 * root.inset; background: Theme.border; }
+    if root.wide: ScrollView {
+        x: root.width - root.inset - root.sidebar-width; y: root.inset;
+        width: root.sidebar-width; height: root.height - 2 * root.inset;
+        content-width: self.visible-width;
+        summary := RouteSummary { padding-right: 4px; }
+    }
+}
+
+component ProgressCell inherits Rectangle {
+    in property <float> progress;
+    in property <string> percent;
+    HorizontalLayout {
+        spacing: 8px;
+        Rectangle {
+            y: (parent.height - self.height) / 2; height: 6px;
+            border-radius: 3px; background: #dfe7ef;
+            Rectangle { x: 0px; height: parent.height; width: parent.width * root.progress; border-radius: 3px; background: #16b36a; }
+        }
+        Muted { text: root.percent; font-size: 11px; width: 36px; }
+    }
+}
+
+component TaskActions inherits HorizontalLayout {
+    in property <TaskRow> task;
+    width: 108px; spacing: 0px; alignment: end;
+    if root.task.pause: ActionButton { icon: @image-url("../resources/icons/Pause-fill.svg"); help: "暂停下载"; flat: true; compact: true; enabled: !Updates.dialog && (!Workspace.busy); clicked => { Workspace.task-action(root.task.id, "pause"); } }
+    if root.task.resume && root.task.state != "等待线路恢复": ActionButton { icon: @image-url("../resources/icons/Play-fill.svg"); help: "继续或重试下载"; flat: true; compact: true; enabled: !Updates.dialog && (!Workspace.busy); clicked => { Workspace.task-action(root.task.id, "resume"); } }
+    if root.task.cancel: ActionButton { icon: @image-url("../resources/icons/X-regular.svg"); help: "取消下载"; flat: true; compact: true; enabled: !Updates.dialog && (!Workspace.busy && !root.task.stopping); clicked => { Workspace.task-action(root.task.id, "cancel"); } }
+    if root.task.completed: ActionButton { icon: @image-url("../resources/icons/FolderOpen-regular.svg"); help: "打开所在目录"; flat: true; compact: true; enabled: !Updates.dialog && (!Workspace.busy); clicked => { Workspace.task-action(root.task.id, "open"); } }
+    ActionButton { enabled: !Updates.dialog; icon: @image-url("../resources/icons/DotsThreeVertical-regular.svg"); help: "下载详情与更多操作"; flat: true; compact: true; clicked => { Workspace.expanded-task = Workspace.expanded-task == root.task.id ? "" : root.task.id; } }
+}
+
+component DetailField inherits HorizontalLayout {
+    in property <string> title;
+    in property <string> value;
+    spacing: 10px;
+    Muted { text: root.title; width: 74px; vertical-alignment: top; }
+    Label { text: root.value; wrap: word-wrap; }
+}
+
+component DetailActions inherits VerticalLayout {
+    in property <TaskRow> task;
+    spacing: 10px;
+    HorizontalLayout {
+        spacing: 8px; alignment: start;
+        if root.task.pause && !root.task.route-editable: ActionButton { text: "先暂停再更改线路"; compact: true; enabled: !Updates.dialog && (!Workspace.busy); clicked => { Workspace.task-action(root.task.id, "pause"); } }
+        if root.task.route-editable: Label { text: "下载线路"; horizontal-stretch: 0; }
+        if root.task.route-editable: ComboBox { model: ["自动选择", "GitHub 直连", "GH-Proxy", "ghproxy.net"]; current-index: root.task.preferred-route; enabled: !Updates.dialog && (!Workspace.busy); selected => { let selected-index = self.current-index; self.current-index = root.task.preferred-route; Workspace.task-route(root.task.id, selected-index); } }
+    }
+    HorizontalLayout {
+        alignment: start;
+        ActionButton { text: "另选目录重新下载"; icon: @image-url("../resources/icons/FolderOpen-regular.svg"); compact: true; enabled: !Updates.dialog && (!Workspace.busy); clicked => { Workspace.task-action(root.task.id, "redownload"); } }
+    }
+    HorizontalLayout {
+        spacing: 8px; alignment: start;
+        ActionButton { text: "复制来源链接"; icon: @image-url("../resources/icons/Link-regular.svg"); compact: true; enabled: !Updates.dialog && (!Workspace.busy); clicked => { Workspace.task-action(root.task.id, "copy"); } }
+        if root.task.repository != "": ActionButton { text: "收藏项目"; icon: @image-url("../resources/icons/Star-regular.svg"); compact: true; enabled: !Updates.dialog && (!Workspace.busy); clicked => { Workspace.task-action(root.task.id, "favorite"); } }
+    }
+    if root.task.queued: HorizontalLayout {
+        spacing: 8px; alignment: start;
+        ActionButton { text: "上移"; compact: true; enabled: !Updates.dialog && (!Workspace.busy && !root.task.first); clicked => { Workspace.task-action(root.task.id, "up"); } }
+        ActionButton { text: "下移"; compact: true; enabled: !Updates.dialog && (!Workspace.busy && !root.task.last); clicked => { Workspace.task-action(root.task.id, "down"); } }
+        ActionButton { text: "置顶"; compact: true; enabled: !Updates.dialog && (!Workspace.busy && !root.task.first); clicked => { Workspace.task-action(root.task.id, "top"); } }
+    }
+    if root.task.removable: HorizontalLayout { alignment: start; ActionButton { text: "移除记录，保留文件"; compact: true; danger: true; enabled: !Updates.dialog && (!Workspace.busy); clicked => { Workspace.task-action(root.task.id, "remove"); } } }
+}
+
+component DownloadRow inherits Rectangle {
+    in property <TaskRow> task;
+    in property <int> number;
+    in property <bool> compact;
+    property <bool> expanded: Workspace.expanded-task == task.id;
+    height: row-content.preferred-height;
+    row-content := VerticalLayout {
+        spacing: 0px;
+        if !root.compact: HorizontalLayout {
+            height: 46px; padding-left: 12px; padding-right: 12px; spacing: 8px;
+            Muted { text: root.number; width: 20px; }
+            Label { text: root.task.filename; horizontal-stretch: 1; min-width: 90px; }
+            Muted { text: root.task.size; width: 65px; }
+            ProgressCell { progress: root.task.progress; percent: root.task.percent; width: 120px; }
+            Muted { text: root.task.speed; width: 105px; }
+            Muted { text: root.task.eta; width: 76px; }
+            Muted { text: root.task.route; width: 75px; }
+            Badge { text: root.task.state; tone: root.task.tone; width: 94px; }
+            TaskActions { task: root.task; }
+        }
+        if root.compact: VerticalLayout {
+            padding: 8px; spacing: 4px;
+            HorizontalLayout {
+                height: 34px; spacing: 8px;
+                Label { text: root.task.filename; horizontal-stretch: 1; font-weight: 600; }
+                Badge { text: root.task.state; tone: root.task.tone; width: 94px; }
+                TaskActions { task: root.task; }
+            }
+            HorizontalLayout {
+                height: 24px; spacing: 12px;
+                ProgressCell { progress: root.task.progress; percent: root.task.percent; horizontal-stretch: 1; }
+                Muted { text: root.task.size; width: 75px; }
+                Muted { text: root.task.speed; width: 110px; horizontal-alignment: right; }
+            }
+        }
+        if root.task.failure != "": Message { text: root.task.failure; error: true; }
+        if root.task.feedback != "": VerticalLayout {
+            padding: 10px; spacing: 8px;
+            Label { text: root.task.feedback; wrap: word-wrap; }
+            if root.task.state == "等待线路恢复": HorizontalLayout { alignment: start; ActionButton { text: "立即重试"; compact: true; enabled: !Updates.dialog && (!Workspace.busy); clicked => { Workspace.task-action(root.task.id, "resume"); } } }
+        }
+        if root.task.suggestion != "": VerticalLayout {
+            padding: 10px; spacing: 8px;
+            Label { text: root.task.suggestion; wrap: word-wrap; }
+            HorizontalLayout {
+                spacing: 8px; alignment: start;
+                ActionButton { text: "换线重新下载"; compact: true; primary: true; enabled: !Updates.dialog && (!Workspace.busy); clicked => { Workspace.task-action(root.task.id, "suggest:" + root.task.suggestion-id); } }
+                ActionButton { text: "继续当前线路"; compact: true; enabled: !Updates.dialog && (!Workspace.busy); clicked => { Workspace.task-action(root.task.id, "dismiss:" + root.task.suggestion-id); } }
+            }
+        }
+        if root.expanded: Rectangle {
+            background: #f2f7fd;
+            height: details.preferred-height;
+            details := VerticalLayout {
+                padding: 16px; spacing: 14px;
+                Rectangle {
+                    property <bool> stacked: self.width < 920px;
+                    height: self.stacked ? info.preferred-height + actions.preferred-height + 18px : max(info.preferred-height, actions.preferred-height);
+                    info := VerticalLayout {
+                        x: 0px; y: 0px;
+                        width: parent.stacked ? parent.width : parent.width - 332px;
+                        height: self.preferred-height; spacing: 8px;
+                        DetailField { title: "完整文件名"; value: root.task.filename; }
+                        DetailField { title: "来源链接"; value: root.task.source-url; }
+                        DetailField { title: "保存位置"; value: root.task.save-path; }
+                        DetailField { title: "已下载"; value: root.task.downloaded; }
+                        DetailField { title: "累计执行耗时"; value: root.task.elapsed; }
+                        DetailField { title: "线路 / 剩余"; value: root.task.route + " / " + root.task.eta; }
+                        Muted { text: "耗时不含排队、等待线路恢复、手动暂停及应用退出时间。"; font-size: 11px; wrap: word-wrap; }
+                    }
+                    actions := DetailActions {
+                        task: root.task;
+                        x: parent.stacked ? 0px : info.width + 24px;
+                        y: parent.stacked ? info.height + 18px : 0px;
+                        width: parent.stacked ? parent.width : 308px;
+                        height: self.preferred-height;
+                    }
+                }
+            }
+        }
+        Rectangle { height: 1px; background: Theme.border; }
+    }
+}
+
+component QueuePanel inherits Panel {
+    property <bool> compact: self.width < 1000px;
+    VerticalLayout {
+        padding: root.compact ? 12px : 16px; spacing: 10px;
+        HorizontalLayout {
+            Label { text: "下载队列"; font-size: root.width < 600px ? 20px : 24px; font-weight: 650; }
+            ActionButton { enabled: !Updates.dialog; text: "新建下载"; compact: true; primary: true; icon: @image-url("../resources/icons/Plus-regular.svg"); clicked => { Workspace.select-download-section(1); } }
+        }
+        HorizontalLayout {
+            spacing: 8px;
+            Stat { title: "任务总数"; value: Workspace.total-tasks; compact: root.height < 500px; icon: @image-url("../resources/icons/Files-regular.svg"); }
+            Stat { title: "执行中"; value: Workspace.running-tasks; compact: root.height < 500px; tone: 1; icon: @image-url("../resources/icons/ArrowsClockwise-regular.svg"); }
+            Stat { title: "排队中"; value: Workspace.queued-tasks; compact: root.height < 500px; tone: 3; icon: @image-url("../resources/icons/ClockCounterClockwise-regular.svg"); }
+            Stat { title: "等待线路恢复"; value: Workspace.recovering-tasks; compact: root.height < 500px; tone: 5; icon: @image-url("../resources/icons/CloudArrowDown-regular.svg"); }
+        }
+        Muted { text: "仅保留最近 50 条结束记录，完整记录见历史。"; font-size: 11px; }
+        if Workspace.queue-message != "": HorizontalLayout {
+            spacing: 8px;
+            Message { text: Workspace.queue-message; success: true; }
+            ActionButton { enabled: !Updates.dialog; icon: @image-url("../resources/icons/X-regular.svg"); help: "关闭队列提示"; flat: true; compact: true; clicked => { Workspace.queue-message = ""; } }
+        }
+        HorizontalLayout {
+            spacing: 8px; alignment: start;
+            ActionButton { text: "全部继续"; icon: @image-url("../resources/icons/Play-fill.svg"); primary: true; compact: true; enabled: !Updates.dialog && (!Workspace.busy && Workspace.can-resume); clicked => { Workspace.batch("resume"); } }
+            ActionButton { text: "全部暂停"; icon: @image-url("../resources/icons/Pause-fill.svg"); compact: true; enabled: !Updates.dialog && (!Workspace.busy && Workspace.can-pause); clicked => { Workspace.batch("pause"); } }
+            ActionButton { text: "清空已完成"; icon: @image-url("../resources/icons/X-regular.svg"); compact: true; enabled: !Updates.dialog && (!Workspace.busy && Workspace.can-clear); clicked => { Workspace.batch("remove"); } }
+        }
+        if !root.compact: Rectangle {
+            height: 36px; background: Theme.subtle;
+            HorizontalLayout {
+                padding-left: 12px; padding-right: 12px; spacing: 8px;
+                Label { text: "#"; width: 20px; } Label { text: "文件名"; min-width: 90px; horizontal-stretch: 1; } Label { text: "大小"; width: 65px; } Label { text: "进度"; width: 120px; } Label { text: "速度"; width: 105px; } Label { text: "剩余时间"; width: 76px; } Label { text: "线路"; width: 75px; } Label { text: "状态"; width: 94px; } Label { text: "操作"; width: 108px; horizontal-alignment: right; }
+            }
+        }
+        if Workspace.tasks.length == 0: VerticalLayout {
+            alignment: center; spacing: 12px;
+            EmptyState { min-height: 100px; title: "准备好你的第一个下载"; description: "点击新建下载，粘贴链接并选择保存目录。"; icon: @image-url("../resources/icons/CloudArrowDown-regular.svg"); }
+        }
+        if Workspace.tasks.length > 0: queue-list := ListView {
+            vertical-stretch: 1;
+            for task[index] in Workspace.tasks: DownloadRow { task: task; number: index + 1; compact: root.compact; }
+        }
+    }
+}
+
+export component DownloadsPage inherits HorizontalLayout {
+    spacing: self.width < 800px ? 10px : 16px;
+    ModuleNavigation {
+        width: root.width < 800px ? 128px : root.width < 1200px ? 164px : 188px;
+        title: "下载";
+        items: ["下载队列", "新建下载", "线路检测"];
+        icons: [@image-url("../resources/icons/ListBullets-regular.svg"), @image-url("../resources/icons/Plus-regular.svg"), @image-url("../resources/icons/ArrowsClockwise-regular.svg")];
+        selected: Workspace.download-section;
+        select(index) => { Workspace.select-download-section(index); }
+    }
+    Rectangle {
+        horizontal-stretch: 1;
+        if Workspace.download-section == 0: QueuePanel { width: parent.width; height: parent.height; }
+        if Workspace.download-section == 1: NewDownloadPanel { width: parent.width; height: parent.height; }
+        if Workspace.download-section == 2: RoutePanel { width: parent.width; height: parent.height; }
+    }
+}

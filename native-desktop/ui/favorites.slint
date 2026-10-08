@@ -1,0 +1,80 @@
+import { ComboBox, ListView } from "std-widgets.slint";
+import { Theme, Panel, Heading, Input, ActionButton, Label, Muted, Stat, Badge, EmptyState, Message, Icon } from "theme.slint";
+import { Favorites, FavoriteRow } from "state.slint";
+
+component FavoriteCard inherits Panel {
+    in property <FavoriteRow> item;
+    VerticalLayout {
+        padding: 18px; spacing: 12px;
+        HorizontalLayout {
+            spacing: 12px;
+            Rectangle { width: 48px; height: 48px; border-radius: 11px; background: root.item.color-index == 0 ? #328ef1 : root.item.color-index == 1 ? #805bea : root.item.color-index == 2 ? #0dae69 : root.item.color-index == 3 ? #f39122 : #ed507c;
+                Icon { source: @image-url("../resources/icons/Cube-regular.svg"); tint: white; width: 29px; preferred-height: 29px; x: 10px; y: 10px; }
+            }
+            VerticalLayout { spacing: 5px; Label { text: root.item.repository; font-size: 15px; font-weight: 600; } Muted { text: "GitHub 公开仓库 · Release 版本追踪"; font-size: 11px; } }
+            Badge { text: root.item.state; tone: root.item.tone; }
+        }
+        HorizontalLayout { spacing: 8px; Icon { source: @image-url("../resources/icons/Tag-regular.svg"); width: 17px; preferred-height: 17px; } Muted { text: "最新正式版："; horizontal-stretch: 0; } Label { text: root.item.tag; font-size: 19px; font-weight: 600; } }
+        Muted { text: "上次检查：" + root.item.checked; }
+        if root.item.error != "": Message { text: root.item.error; error: root.item.tone == 2; }
+        HorizontalLayout {
+            spacing: 7px;
+            ActionButton { text: "检查更新"; icon: @image-url("../resources/icons/Play-fill.svg"); compact: true; soft: true; enabled: !Favorites.busy; clicked => { Favorites.action(root.item.repository, "check"); } }
+            ActionButton { text: "查看版本与附件"; icon: @image-url("../resources/icons/FolderOpen-regular.svg"); compact: true; enabled: !Favorites.busy; clicked => { Favorites.action(root.item.repository, "browse"); } }
+            Rectangle { horizontal-stretch: 1; }
+            ActionButton { icon: @image-url("../resources/icons/Trash-regular.svg"); help: "移除收藏，不影响下载文件"; danger: true; compact: true; enabled: !Favorites.busy; clicked => { Favorites.action(root.item.repository, "remove"); } }
+        }
+    }
+}
+
+export component FavoritesPage inherits VerticalLayout {
+    spacing: 16px;
+    Panel {
+        VerticalLayout {
+            padding: 20px; spacing: 20px;
+            Heading { title: "项目收藏"; description: "收藏并关注常用的 GitHub 项目，查看最新正式版本和下载附件。"; page: true; icon: @image-url("../resources/icons/Star-fill.svg"); }
+            HorizontalLayout { spacing: 18px; Input { text <=> Favorites.input; placeholder: "请输入 GitHub 仓库链接，例如 https://github.com/microsoft/PowerToys"; icon: @image-url("../resources/icons/Link-regular.svg"); enabled: !Favorites.busy; accepted => { Favorites.add(); } } ActionButton { text: "添加收藏"; icon: @image-url("../resources/icons/Plus-regular.svg"); primary: true; min-width: 180px; enabled: !Favorites.busy && Favorites.input != ""; clicked => { Favorites.add(); } } }
+            if Favorites.message != "": Message { text: Favorites.message; }
+        }
+    }
+    Panel {
+        VerticalLayout {
+            padding: 20px; spacing: 14px;
+            HorizontalLayout {
+                spacing: 18px;
+                Stat { title: "收藏项目数（最多 200 个）"; value: Favorites.total; icon: @image-url("../resources/icons/Cube-regular.svg"); }
+                Stat { title: "检查成功"; value: Favorites.successful; tone: 1; icon: @image-url("../resources/icons/CheckCircle-regular.svg"); }
+                Stat { title: "检查异常"; value: Favorites.failed; tone: 2; icon: @image-url("../resources/icons/WarningCircle-regular.svg"); }
+            }
+            HorizontalLayout { spacing: 16px; ActionButton { text: Favorites.busy ? "正在检查…" : "检查全部"; icon: @image-url("../resources/icons/Play-fill.svg"); primary: true; min-width: 210px; enabled: !Favorites.busy && Favorites.total > 0; clicked => { Favorites.action("", "check"); } } Muted { text: "上次检查：" + Favorites.checked; } }
+        }
+    }
+    Panel {
+        VerticalLayout {
+            padding: 16px; spacing: 14px;
+            HorizontalLayout {
+                spacing: 8px;
+                for label[index] in ["全部", "检查成功", "检查失败", "待检查"]: ActionButton { text: label + " " + (index == 0 ? Favorites.total : index == 1 ? Favorites.successful : index == 2 ? Favorites.failed : Favorites.pending); primary: Favorites.filter == index; compact: true; clicked => { Favorites.filter = index; Favorites.filter-changed(); } }
+                Rectangle { horizontal-stretch: 1; }
+                ComboBox { model: ["检查时间", "项目名称"]; current-index <=> Favorites.sort; selected => { Favorites.filter-changed(); } }
+            }
+            HorizontalLayout { alignment: end; spacing: 3px; ActionButton { text: "卡片"; icon: @image-url("../resources/icons/SquaresFour-regular.svg"); soft: !Favorites.list; compact: true; clicked => { Favorites.list = false; } } ActionButton { text: "列表"; icon: @image-url("../resources/icons/ListBullets-regular.svg"); soft: Favorites.list; compact: true; clicked => { Favorites.list = true; } } }
+            if Favorites.rows.length == 0: EmptyState { title: Favorites.total > 0 ? "没有符合条件的收藏" : "还没有收藏项目"; description: Favorites.total > 0 ? "切换筛选条件查看其他项目。" : "从上方仓库链接或下载来源添加，常用项目触手可及。"; icon: @image-url("../resources/icons/Star-regular.svg"); }
+            if Favorites.rows.length > 0: favorite-list := ListView {
+                height: 560px;
+                property <int> columns: Favorites.list ? 1 : self.width > 1140px ? 3 : self.width > 640px ? 2 : 1;
+                for index in ceil(Favorites.rows.length / self.columns): Rectangle {
+
+                    height: 312px;
+                    HorizontalLayout {
+                        spacing: 14px; padding-bottom: 14px;
+                        for column in favorite-list.columns: Rectangle {
+                            if index * favorite-list.columns + column < Favorites.rows.length: FavoriteCard { item: Favorites.rows[index * favorite-list.columns + column]; }
+                        }
+                    }
+                }
+            }
+            Muted { text: "首次成功检查建立正式版基线，之后有新版本时生成提醒。自动检查可在设置中启用。"; font-size: 11px; wrap: word-wrap; }
+        }
+    }
+}

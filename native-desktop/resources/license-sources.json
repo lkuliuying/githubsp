@@ -1,0 +1,100 @@
+[
+  {
+    "packages": [
+      "accesskit",
+      "accesskit_consumer",
+      "accesskit_windows",
+      "accesskit_winit"
+    ],
+    "files": [
+      {
+        "file": "accesskit-LICENSE-APACHE.txt",
+        "source": "https://raw.githubusercontent.com/AccessKit/accesskit/a55d3e1a18bb9ef0e4bccc9083fb13c3e0ad8969/LICENSE-APACHE",
+        "sha256": "62C7A1E35F56406896D7AA7CA52D0CC0D272AC022B5D2796E7D6905DB8A3636A"
+      },
+      {
+        "file": "accesskit-LICENSE-MIT.txt",
+        "source": "https://raw.githubusercontent.com/AccessKit/accesskit/a55d3e1a18bb9ef0e4bccc9083fb13c3e0ad8969/LICENSE-MIT",
+        "sha256": "23F18E03DC49DF91622FE2A76176497404E46CED8A715D9D2B67A7446571CCA3"
+      },
+      {
+        "file": "accesskit-LICENSE.chromium.txt",
+        "source": "https://raw.githubusercontent.com/AccessKit/accesskit/a55d3e1a18bb9ef0e4bccc9083fb13c3e0ad8969/LICENSE.chromium",
+        "sha256": "845022E0C1DB1ABB41A6BA4CD3C4B674EC290F3359D9D3C78AE558D4C0ED9308"
+      }
+    ]
+  },
+  {
+    "packages": [
+      "clipboard-win"
+    ],
+    "files": [
+      {
+        "file": "clipboard-win-LICENSE.txt",
+        "source": "https://raw.githubusercontent.com/DoumanAsh/clipboard-win/3b27cf2bfd1adcfa6e0264eb51c1025ddaf0f342/LICENSE",
+        "sha256": "C9BFF75738922193E67FA726FA225535870D2AA1059F91452C411736284AD566"
+      }
+    ]
+  },
+  {
+    "packages": [
+      "lyon_algorithms",
+      "lyon_extra",
+      "lyon_geom",
+      "lyon_path"
+    ],
+    "files": [
+      {
+        "file": "lyon-LICENSE-APACHE.txt",
+        "source": "https://raw.githubusercontent.com/nical/lyon/994526f2766c7e9bc5bb16687232fd7e8999dbdf/LICENSE-APACHE",
+        "sha256": "216486F29671A4262EFE32AF6D84A75BEF398127F8C5F369B5C8305983887A06"
+      },
+      {
+        "file": "lyon-LICENSE-MIT.txt",
+        "source": "https://raw.githubusercontent.com/nical/lyon/994526f2766c7e9bc5bb16687232fd7e8999dbdf/LICENSE-MIT",
+        "sha256": "80F275E90D799911ED3830A7F242A2EF5A4ADE2092FE0AA07BFB2D2CF2F2B95E"
+      }
+    ]
+  },
+  {
+    "packages": [
+      "profiling"
+    ],
+    "files": [
+      {
+        "file": "profiling-LICENSE-APACHE.txt",
+        "source": "https://raw.githubusercontent.com/aclysma/profiling/8271551172eb6fa4cba47369aedd93790c623df9/LICENSE-APACHE",
+        "sha256": "10D30A673CD5E9349BDC02AEB48F14B3386D27D0DA32DF8F0A555D4AA16AA551"
+      },
+      {
+        "file": "profiling-LICENSE-MIT.txt",
+        "source": "https://raw.githubusercontent.com/aclysma/profiling/8271551172eb6fa4cba47369aedd93790c623df9/LICENSE-MIT",
+        "sha256": "C8167FDEEED46D3F244D3F85C5BF998CE889343691C32BE2C61A8BC4B5C08333"
+      }
+    ]
+  },
+  {
+    "packages": [
+      "spirv"
+    ],
+    "files": [
+      {
+        "file": "spirv-LICENSE.txt",
+        "source": "https://raw.githubusercontent.com/gfx-rs/rspirv/8afc3d0ac8e158128cd1410bb2e4b4c26ab11bb4/LICENSE",
+        "sha256": "CFC7749B96F63BD31C3C42B5C471BF756814053E847C10F3EB003417BC523D30"
+      }
+    ]
+  },
+  {
+    "packages": [
+      "taffy"
+    ],
+    "files": [
+      {
+        "file": "taffy-LICENSE.md.txt",
+        "source": "https://raw.githubusercontent.com/DioxusLabs/taffy/639f0acdd20f914f847abffbeaa903d66cae4882/LICENSE.md",
+        "sha256": "A7083EF3DD41A65EEB2162C2C091B0082E2724FB4C6ED029B363C7840D244ECD"
+      }
+    ]
+  }
+]

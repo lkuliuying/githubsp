@@ -1,0 +1,78 @@
+import { ComboBox, ScrollView, ListView } from "std-widgets.slint";
+import { Theme, Panel, Heading, Input, ActionButton, Label, Muted, Stat, Badge, EmptyState, Message } from "theme.slint";
+import { History, Workspace } from "state.slint";
+
+export component HistoryPage inherits VerticalLayout {
+    spacing: 16px;
+    Panel {
+        VerticalLayout {
+            padding: 20px; spacing: 20px;
+            Heading { page: true; title: "下载历史"; description: "搜索和管理过去的下载记录，快速查找、重新下载和定位文件。"; icon: @image-url("../resources/icons/ClockCounterClockwise-regular.svg"); }
+            HorizontalLayout {
+                spacing: 12px;
+                VerticalLayout { spacing: 8px; Label { text: "文件名、仓库或版本"; } Input { text <=> History.query; placeholder: "输入文件名、owner/repo 或版本关键词"; icon: @image-url("../resources/icons/MagnifyingGlass-regular.svg"); enabled: !History.busy; accepted => { History.load(1); } } }
+                VerticalLayout { spacing: 8px; Label { text: "任务状态"; } ComboBox { model: ["全部状态", "等待下载", "检测下载线路", "正在下载", "等待重试", "等待线路恢复", "正在完成下载", "正在保存进度", "正在取消", "已暂停", "下载完成", "下载失败", "已取消"]; current-index <=> History.filter; enabled: !History.busy; } }
+                VerticalLayout { alignment: end; ActionButton { text: History.busy ? "读取中…" : "搜索 / 刷新"; icon: @image-url("../resources/icons/MagnifyingGlass-regular.svg"); primary: true; enabled: !History.busy; clicked => { History.load(1); } } }
+                VerticalLayout { alignment: end; ActionButton { text: "重置"; icon: @image-url("../resources/icons/ArrowCounterClockwise-regular.svg"); enabled: !History.busy; clicked => { History.reset(); } } }
+            }
+            HorizontalLayout {
+                spacing: 12px;
+                Stat { title: "匹配记录"; value: History.total; icon: @image-url("../resources/icons/Files-regular.svg"); }
+                Stat { title: "本页已完成"; value: History.completed; tone: 1; icon: @image-url("../resources/icons/CheckCircle-fill.svg"); }
+                Stat { title: "本页下载失败"; value: History.failed; tone: 2; icon: @image-url("../resources/icons/XCircle-regular.svg"); }
+                Stat { title: "本页文件异常"; value: History.missing; tone: 3; icon: @image-url("../resources/icons/WarningCircle-regular.svg"); }
+            }
+        }
+    }
+    Panel {
+        VerticalLayout {
+            padding: 20px; spacing: 14px;
+            Heading { title: "下载历史列表 · 共 " + History.total + " 条记录"; icon: @image-url("../resources/icons/ListBullets-regular.svg"); Muted { text: "按添加时间倒序"; } }
+            if History.message != "": Message { text: History.message; }
+            ScrollView {
+                height: History.rows.length == 0 ? 225px : 390px;
+                content-width: max(self.visible-width, 1210px);
+                content-height: self.visible-height;
+                VerticalLayout {
+                    spacing: 0px;
+                    Rectangle { height: 40px; background: Theme.subtle;
+                        HorizontalLayout { padding: 12px; spacing: 12px; Label { text: "#"; width: 30px; } Label { text: "文件名"; width: 215px; } Label { text: "仓库 / 来源"; width: 140px; } Label { text: "版本"; width: 80px; } Label { text: "下载时间"; width: 155px; } Label { text: "保存路径"; width: 185px; } Label { text: "文件状态"; width: 100px; } Label { text: "操作"; } }
+                    }
+                    if History.rows.length == 0: EmptyState { title: "没有匹配的下载记录"; description: "调整搜索关键词或状态筛选后重试。"; icon: @image-url("../resources/icons/ClockCounterClockwise-regular.svg"); }
+                    if History.rows.length > 0: ListView {
+                        for row in History.rows: Rectangle {
+                            height: 68px;
+                            HorizontalLayout {
+                                padding: 12px; spacing: 12px;
+                                Muted { text: row.number; width: 30px; }
+                                VerticalLayout { width: 215px; spacing: 5px; Label { text: row.name; font-weight: 600; } Muted { text: row.state; font-size: 11px; } }
+                                Label { text: row.repository; width: 140px; }
+                                Label { text: row.tag; width: 80px; }
+                                VerticalLayout { width: 155px; spacing: 4px; Label { text: row.date; font-size: 11px; } Muted { text: "完成：" + row.completed; font-size: 10px; } }
+                                Muted { text: row.path; width: 185px; }
+                                Badge { text: row.file-state; tone: row.tone; width: 100px; }
+                                HorizontalLayout {
+                                    spacing: 0px; alignment: start;
+                                    ActionButton { icon: @image-url("../resources/icons/Link-regular.svg"); help: "复制来源链接"; flat: true; compact: true; enabled: !Workspace.busy; clicked => { Workspace.task-action(row.id, "copy"); } }
+                                    ActionButton { icon: @image-url("../resources/icons/DownloadSimple-regular.svg"); help: "重新下载"; flat: true; compact: true; enabled: !Workspace.busy; clicked => { Workspace.task-action(row.id, "redownload"); } }
+                                    ActionButton { icon: @image-url("../resources/icons/FolderOpen-regular.svg"); help: "打开目录"; flat: true; compact: true; enabled: !Workspace.busy; clicked => { Workspace.task-action(row.id, "open"); } }
+                                    if row.removable: ActionButton { icon: @image-url("../resources/icons/Trash-regular.svg"); help: "移除记录，保留文件"; flat: true; compact: true; enabled: !Workspace.busy; clicked => { Workspace.task-action(row.id, "remove"); } }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            HorizontalLayout {
+                spacing: 8px;
+                Muted { text: "共 " + History.total + " 条 · 每页 20 条"; horizontal-stretch: 1; }
+                ActionButton { text: "上一页"; compact: true; enabled: !History.busy && History.page > 1; clicked => { History.load(History.page - 1); } }
+                for index in min(5, History.pages): ActionButton { property <int> number: max(1, min(History.page - 2, History.pages - 4)) + index; text: self.number; primary: self.number == History.page; compact: true; enabled: !History.busy; clicked => { History.load(self.number); } }
+                ActionButton { text: "下一页"; compact: true; enabled: !History.busy && History.page < History.pages; clicked => { History.load(History.page + 1); } }
+                Input { text <=> History.jump; placeholder: "页码"; width: 57px; enabled: !History.busy; accepted => { History.jump-to(); } }
+                ActionButton { text: "跳转"; compact: true; enabled: !History.busy; clicked => { History.jump-to(); } }
+            }
+            Muted { text: "移除记录不会删除已下载文件。文件状态按当前保存位置检查。"; font-size: 11px; }
+        }
+    }
+}

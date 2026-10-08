@@ -1,0 +1,104 @@
+import { ScrollView } from "std-widgets.slint";
+import { Theme, Label, Muted, Icon, ActionButton, Message } from "theme.slint";
+import { Workspace, Updates } from "state.slint";
+import { DownloadsPage } from "downloads.slint";
+import { HistoryPage } from "history.slint";
+import { FavoritesPage } from "favorites.slint";
+import { SettingsPage, UpdateDialog } from "settings.slint";
+import "../resources/NotoSansSC-Regular.otf";
+export { CompletionWindow, AboutWindow } from "windows.slint";
+export { Workspace, Sources, History, Favorites, Preferences, Storage, Updates, TaskRow, RouteRow, ReleaseRow, AssetRow, PreviewRow, HistoryRow, FavoriteRow, NoteBlock, NoteTableRow } from "state.slint";
+
+export component MainWindow inherits Window {
+    title: "GitHubSP · 下载加速";
+    icon: @image-url("../resources/tray.png");
+    preferred-width: 1040px;
+    preferred-height: 740px;
+    min-width: 720px;
+    min-height: 520px;
+    background: Theme.canvas;
+    default-font-family: "Segoe UI";
+    default-font-size: 13px;
+    in-out property <bool> busy <=> Workspace.busy;
+    in-out property <string> message <=> Workspace.message;
+    in-out property <string> directory <=> Workspace.directory;
+    private property <bool> show-notices;
+    private property <int> current-page: Workspace.page;
+    changed current-page => { main-scroll.content-y = 0px; }
+    callback hide-to-tray();
+    callback exit();
+    callback refresh-state();
+    callback show-main();
+    callback about();
+    VerticalLayout {
+        spacing: 0px;
+        Rectangle {
+            height: root.width <= 800px ? 112px : 82px;
+            background: #f6fbff;
+            Rectangle { y: parent.height - 1px; height: 1px; background: Theme.border; }
+            HorizontalLayout {
+                x: root.width <= 800px ? 16px : 26px; y: root.width <= 800px ? 12px : 17px; height: 48px; spacing: 12px;
+                Icon { source: @image-url("../resources/icons/CloudArrowDown-fill.svg"); tint: Theme.green; width: 44px; preferred-height: 44px; }
+                VerticalLayout { spacing: 3px; Label { text: "GitHubSP"; font-size: root.width < 1200px ? 20px : 22px; font-weight: 700; } Muted { text: "更快的 GitHub 资源下载工具"; font-size: 11px; } }
+            }
+            nav := HorizontalLayout {
+                x: root.width <= 800px ? 16px : (root.width - self.width) / 2;
+                y: root.width <= 800px ? 62px : 15px;
+                width: root.width <= 800px ? root.width - 32px : root.width < 1200px ? 425px : 488px;
+                height: root.width <= 800px ? 48px : 52px; spacing: 7px;
+                for item[index] in [
+                    { label: "下载", icon: @image-url("../resources/icons/DownloadSimple-regular.svg") },
+                    { label: "历史", icon: @image-url("../resources/icons/ClockCounterClockwise-regular.svg") },
+                    { label: "收藏", icon: @image-url("../resources/icons/Star-regular.svg") },
+                    { label: "设置", icon: @image-url("../resources/icons/GearSix-regular.svg") }
+                ]: Rectangle {
+                    border-radius: 10px; background: Workspace.page == index ? Theme.green-soft : transparent;
+                    ActionButton { text: item.label; icon: item.icon; icon-size: 23px; font-size: 15px; weight: Workspace.page == index ? 650 : 400; soft: Workspace.page == index; flat: true; enabled: !Updates.dialog; clicked => { Workspace.navigate(index); } }
+                    if Workspace.page == index: Rectangle { x: 12px; y: parent.height - 3px; height: 3px; width: parent.width - 24px; border-radius: 2px; background: Theme.green; }
+                }
+            }
+            ActionButton { enabled: !Updates.dialog; x: parent.width - 155px; y: root.width <= 800px ? 16px : 21px; width: 140px; height: 40px; text: "收起到托盘"; icon: @image-url("../resources/icons/Tray-regular.svg"); flat: true; clicked => { root.hide-to-tray(); } }
+        }
+        VerticalLayout {
+            padding: 16px;
+            padding-top: 14px; spacing: 10px;
+            if Workspace.message != "": HorizontalLayout {
+                spacing: 8px;
+                error-scroll := ScrollView {
+                    horizontal-stretch: 1;
+                    height: min(error-message.min-height, 76px);
+                    content-width: self.visible-width;
+                    error-message := Message { width: error-scroll.visible-width; height: self.min-height; text: Workspace.message; error: true; }
+                }
+                ActionButton { enabled: !Updates.dialog; icon: @image-url("../resources/icons/X-regular.svg"); help: "关闭错误提示"; flat: true; compact: true; clicked => { Workspace.message = ""; } }
+            }
+            if Workspace.notices != "": VerticalLayout {
+                spacing: 8px;
+                HorizontalLayout { spacing: 10px; ActionButton { enabled: !Updates.dialog; text: root.show-notices ? "收起应用提醒" : "查看应用提醒"; soft: true; compact: true; clicked => { root.show-notices = !root.show-notices; } } Rectangle {} ActionButton { text: "全部已读"; compact: true; enabled: !Updates.dialog && !Workspace.busy; clicked => { Workspace.acknowledge(); } } }
+                if root.show-notices: ScrollView { height: 72px; content-width: self.visible-width; Message { text: Workspace.notices; success: true; } }
+            }
+            Rectangle {
+                vertical-stretch: 1;
+                min-height: 120px;
+                if Workspace.page == 0: DownloadsPage { width: parent.width; height: parent.height; }
+                if Workspace.page == 3: SettingsPage { width: parent.width; height: parent.height; }
+                main-scroll := ScrollView {
+                    visible: Workspace.page == 1 || Workspace.page == 2;
+                    enabled: self.visible && !Updates.dialog;
+                    width: parent.width; height: parent.height;
+                    content-width: self.visible-width;
+                    VerticalLayout {
+                        if Workspace.page == 1: HistoryPage {}
+                        if Workspace.page == 2: FavoritesPage {}
+                    }
+                }
+            }
+        }
+        Rectangle {
+            height: 34px; background: #f6fbff;
+            Rectangle { height: 1px; background: Theme.border; }
+            HorizontalLayout { padding-left: 26px; padding-right: 26px; spacing: 12px; Muted { text: "GitHubSP v0.2.3   │   简单 · 稳定 · 专注下载"; font-size: 11px; } Muted { text: "逐个下载 · 关闭时保存进度 · 重启后手动继续"; font-size: 11px; horizontal-alignment: right; } }
+        }
+    }
+    if Updates.dialog: UpdateDialog {}
+}

@@ -1,0 +1,31 @@
+[package]
+name = "githubsp-core"
+version.workspace = true
+description = "GitHub Release 下载加速工具"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[lib]
+name = "githubsp_lib"
+
+[dependencies]
+tokio = { version = "1", features = ["fs", "io-util", "macros", "net", "rt-multi-thread", "sync", "time"] }
+tokio-util = { version = "0.7", features = ["rt"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-native-roots", "stream", "json"] }
+futures-util = "0.3"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+rusqlite = { version = "=0.39.0", features = ["bundled", "backup"] }
+sha2 = "0.10"
+url = "2"
+percent-encoding = "2"
+uuid = { version = "1", features = ["v4"] }
+tempfile = "3"
+thiserror = "2"
+httpdate = "1"
+dunce = "1"
+semver = "1"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Storage_FileSystem", "Win32_UI_WindowsAndMessaging"] }
