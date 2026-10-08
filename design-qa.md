@@ -1,4 +1,170 @@
-# 前端参考图核对
+# 界面设计与验收
+
+## 2026-10-08：v0.2.4 发布基线
+
+用户确认新建下载选项 1、线路检测选项 2 的成品没有问题，并授权分批提交、推送、发布 v0.2.4 及发布后的目录清理。本次将既有 Slint 迁移、原生工作区和界面验收成果纳入 Git；下面各节中的 v0.2.3 试用路径、摘要和“未发布”标记仍是当时的历史状态。
+
+- 根 workspace、`githubsp-core`、`githubsp-native` 和主窗口／设置／更新／关于中的版本统一为 0.2.4。锁文件只改变两个本项目包的版本，第三方依赖版本不变。
+- 初次暂存检查发现上游声明包含两处行尾空格；随后明确规范汇总文件的 LF 换行及行尾空白，修正暂存时混合换行导致的空白检查问题。`scripts/native-notices.ps1` 只对生成文本做空白规范化，许可正文经逐字比较一致，上游许可文件不改动。
+- `.\scripts\native-cargo.ps1 -CargoArguments @('test','--workspace','--locked','--offline')`：95 项核心、16 项原生测试通过，文档测试 0 项。
+- `.\scripts\native-cargo.ps1 -CargoArguments @('clippy','--workspace','--all-targets','--locked','--offline','--','-D','warnings')` 和 `cargo fmt --all -- --check`：通过。
+- 本次截图目录为 `artifacts/releases/v0.2.4/audit/ui-renders`，保留旧截图。测试仍使用隔离数据库、回环服务及软件后端；不能据此声称真实外网、DPI、多显示器、输入法或干净系统通过。
+- 发布入口为 `.\scripts\package-native-windows.ps1 -Offline -OutputDirectory 'artifacts/releases/v0.2.4'`。正式附件为 exe、从发布标签导出的源码 ZIP、`LICENSE`、`THIRD_PARTY_NOTICES.txt`、`SHA256SUMS.txt`；源码归档不包含本地证据、构建缓存或数据。
+- 发布构建、隔离启动、远端附件回下载和发布后的清理结果记录在本地 `artifacts/releases/v0.2.4/audit/DELIVERY.md`；本节仅列出提交前已经执行的验证，不预先将后续步骤记为通过。
+
+README 已同步 v0.2.4 下载入口、原生构建、目录职责和保留范围。独立项目记忆文件仍不存在，外部 Vue/Tauri 记忆只作历史参考。清理限于已核实的生成文件、依赖／编译缓存和空旧目录；正式数据、历史源码归档、试用包、许可证原件及截图证据保留。
+
+---
+
+## 2026-10-08：新建下载选 1、线路检测选 2
+
+本轮在下面已完成的 A／B／C 版本上，调整 `NewDownloadPanel`、`SourceBrowser`、版本与附件列表、`RoutePanel` 及必要展示字段。实际 Windows 验收同时发现公共错误提示区的既有零高度问题，补充了宽高绑定这一处最小修正。队列、设置、历史、收藏和窗口的内容布局，以及下载核心、数据库和依赖保持原状。所有既有未提交迁移成果保留，版本仍为 0.2.3。
+
+### 视觉目标与证据
+
+- 新建下载：选项 1「紧凑双栏」设计板的上半部分，原图按字节保存在 `artifacts/download-layout-review/references/new-download-option-1.png`。
+- 线路检测：选项 2「聚焦流程」设计板的下半部分，原图按字节保存在 `artifacts/download-layout-review/references/routes-option-2.png`。
+- 两张原始设计板都是 1024×1536，包含两个页面及板外标题；对照时分别取所选页面的内容区域，按窗口和内容区比例核对，不将整张设计板误作单页视口。不对生成图的系统标题栏进行重绘，也不声称逐像素相同。
+- 实现来自真实 Slint 软件测试后端，客户端为 1448×1086、1040×740、720×520；像素尺寸与测试窗口尺寸一致，密度为 1，没有浏览器 CSS 视口。目录响应使用回环 HTTP fixture，线路结果明确注入 `Snapshot`，不代表实时测速。
+- 对照入口：`artifacts/download-layout-review/index.html`。本轮共 100 张软件截图；其中 `selected-new-download-*` 和 `selected-routes-*` 为选择方向的主要证据，`selected-new-directory-*`、`selected-routes-info-*` 为滚动后证据，`diagnostic-input-error-*` 验证错误信息可见。上一轮截图没有覆盖。
+- 将原始参考和 1040×740 实现截图在同轮图像输入中比较，并检查三种尺寸。重点区域包括版本分页、附件选择与底栏、速度与错误列、最快摘要。主要控件与文字在原尺寸清晰可读，无需另造放大截图。
+
+### 布局及保留的行为
+
+1. 新建下载按“模式 → 仓库地址 → 版本与附件 → 保存目录 → 固定预览操作”排列。正文不足 660px 时版本和附件上下堆叠；短窗口隐藏辅助副标题。直链和批量入口保留独立草稿，共用目录。
+2. 版本分页移到列表顶部，版本说明放在列表底部；附件选中行使用浅绿色背景。底栏按现有选择状态汇总数量和大小，跨版本所选附件也计入，未知或无法合计时不伪造大小。继续使用现有十进制单位与显示精度。
+3. 线路检测在宽内容区采用结果列表与右侧摘要，内容宽度不足 720px 时摘要移到列表之后。地址、检测按钮和标题固定，列表及长错误文本可以滚动。
+4. 最快名称和速度直接从 `Snapshot` 映射，检测中清空旧摘要。缓存缺少检测来源时，最快摘要标记为历史结果。空白地址、下载期间检测及不自动切换线路的行为不变。
+5. 复用已有云下载、广播、链接、文件等 Phosphor SVG。参考图中的 GitHub 猫图标、示例域名、橙色低速判断和数值精度不作为新增产品语义；保留实际品牌和单位规则。
+
+### 视觉复核与修正记录
+
+| 项目 | 结果 |
+| --- | --- |
+| 字体与排版 | 沿用 Segoe UI 与已有中文回退；标题 20/24px，内容使用既有 11–13px 层级，速度单独强调；长错误换行，文件名按原规则省略。 |
+| 间距与布局 | 新建页保持约 36%／64% 版本附件分栏；检测侧栏约占 30%，上限 280px。默认窗口内目录和预览按钮完整可见，窄窗口正文滚动。 |
+| 颜色与状态 | 沿用浅蓝背景、白色内容区、绿色操作；可用/失败继续配合文字和图标，不只用颜色传达结果。 |
+| 图像与图标 | 复用嵌入的既有 SVG，无新增在线素材或生成插画；未修改公共品牌、导航或其他页面资源。 |
+| 文案与内容 | 保留真实接口状态、公开附件范围、目录校验和预览流程；检测说明集中，示例数据仅存在于测试和预览图。 |
+
+首次软件对照发现 [P2] 默认尺寸下第三个版本部分隐藏、附件选择框与文件图标垂直不齐。版本行改为 44px、底部说明 54px，附件行 50px，并让选择框使用完整行高度。重新生成的 `selected-new-download-1040x740.png` 显示三个版本、三个附件和目录均完整可见；720×520 下滚动后目录和固定按钮仍可操作。该项已解决，没有剩余 P0/P1/P2 视觉问题。
+
+随后 Windows 实机输入无效检测地址时发现 [P2] 公共错误提示仅显示关闭按钮，错误文字不可见。该区域原先读取 `Message.preferred-height`，但组件仅声明内容计算得到的 `min-height`，造成滚动区高度为零；`main.slint` 与本轮基线比对确认问题预先存在。现改为按内容最小高度设置滚动区、明确内容宽高，超过 76px 时仍在提示区内滚动。三种尺寸新增文字可访问性、提示宽高及关闭／检测按钮可达断言，软件截图均能读到错误原因。
+
+已接受的差异：参考是生成设计板，当前使用真实原生窗口、原有字体和功能文案；速度 `3.24 MB/s` 显示为现有规则的 `3.2 MB/s`，`128.36 KB/s` 显示为 `128 KB/s`。窄窗口没有对应生成图，按既定最小尺寸与滚动规则验收。
+
+### 自动化验证
+
+本轮运行测试前设置 `$env:GITHUBSP_UI_RENDER_DIRECTORY = 'F:\Program\githubsp\artifacts\download-layout-review\ui-renders'`，仅影响测试截图输出。
+
+| 实际命令 | 结果 |
+| --- | --- |
+| `.\scripts\native-cargo.ps1 -CargoArguments @('test','-p','githubsp-native','--locked','--offline')` | 最终 16 项通过，包含错误提示区修正；`native-tests-final.log` |
+| `.\scripts\native-cargo.ps1 -CargoArguments @('test','--workspace','--locked','--offline')` | 核心 95 项、原生 16 项通过；文档测试 0 项；`workspace-tests.log` |
+| `.\scripts\native-cargo.ps1 -CargoArguments @('clippy','--workspace','--all-targets','--locked','--offline','--','-D','warnings')` | 最终通过；`clippy-final.log` |
+| `cargo fmt --all -- --check` | 最终通过 |
+
+新增验证覆盖：跨版本选择数量和大小、切页保留选择、目录可达、分页失败保留原页和附件、最快结果字段、历史摘要、检测中清空旧结果、全部失败及长错误、公共输入错误实际可见；既有草稿、部分创建失败、迟到响应、设置和弹窗回归继续执行。工作区全套测试在最后提示区修正前通过，修正后重跑完整原生测试及工作区 Clippy；未修改核心源码。
+
+初期失败已保留日志并修正：Slint 列宽引用滚动内容造成循环绑定，改用独立外层宽度；新增测试辅助函数错误选择旧队列滚动区，改为识别新建页；大小断言原先未遵循 100 MB 以上的既有取整规则，核对 `presentation::size` 后修正期望；新增场景结束时未恢复原设置页，导致后续更新弹窗测试失败，现已恢复原页面。没有删除或放宽既有业务断言。
+
+### 打包、原生验收与范围复核
+
+| 实际命令 | 结果 |
+| --- | --- |
+| `.\scripts\package-native-windows.ps1 -Offline -OutputDirectory 'artifacts/download-layout-review/package'` | 最终通过，包含错误提示区修正；`package-final.log`。运行依赖与 PE 导入检查通过。 |
+| `.\scripts\test-native-startup.ps1 -Executable '.\artifacts\download-layout-review\package\GitHubSP-v0.2.3-windows-x64.exe'` | 最终通过；`startup-final.log`、`startup-result.json`。中文隔离目录、主窗口、单实例和正常保存退出均通过，未发现待核对的运行库模块。 |
+| `git diff --check` | 通过；另对本轮 8 个文件执行与字节基线的 `git -c core.autocrlf=false diff --no-index --check`，均通过。 |
+
+最终产物：`artifacts/download-layout-review/package/GitHubSP-v0.2.3-windows-x64.exe`，50,605,568 字节，版本 0.2.3。SHA-256：`702247727E24AC78FC4F14B59DBDC2B363631E1C49D6917CF0424B7FE0C115DC`，同时写在包内 `SHA256SUMS.txt`。旧 A／B／C 与 Slint 迁移试用 exe 的摘要保持原样。
+
+最终 exe 使用专用 `artifacts/download-layout-review/native-final-data` 在当前 Windows 开发机实际运行，核对新建页的版本／附件双栏、仓库输入后启用查找、切换模块后保留仓库草稿、线路页结果与摘要、无效检测地址错误文字可见及关闭提示。没有向示例仓库发起请求，也没有进行外网测速。4 张最终窗口截图为 `native-captures/new-download-final.jpg`、`new-download-draft-final.jpg`、`routes-empty-final.jpg`、`routes-invalid-final.jpg`；客户端为默认 1040×740，截图含系统标题栏。`routes-invalid-before.jpg` 保留修正前仅显示关闭按钮的证据，其余无 `final` 后缀的截图也来自首次构建，不作为最终 exe 的证据。最终验收窗口关闭后确认对应进程已退出。
+
+软件渲染与本机 Windows 验收分别记录。完整真实网络、DPI、多显示器、输入法和干净系统验收未执行，不能从以上结果推断通过。
+
+读取 README、本文、资源说明和外部历史记忆；当前架构以 Cargo 与 Slint 源码核实，旧 Vue/Tauri 记录仍标为历史。未发现独立项目记忆文件，也未建立新记忆体系。本轮 README 同步两个选图方向、尺寸规则、展示字段、测试截图目录参数和新试用位置。
+
+本轮开始保存了 138 个相关文件摘要和 7 个拟修改文件的字节基线，公共提示区修正前补存 `main.slint`，共 8 个文件基线。`downloads.slint` 中从 `ProgressCell` 到文件末尾的队列与公共导航区已与基线核对一致。证据、日志和试用包统一位于被忽略的 `artifacts/download-layout-review/`，正式数据不用于测试。
+
+最终摘要复核仅以上 8 个文件改变，其余 130 个基线文件保持原样；Git 状态条目与开工基线一致，既有未提交改动未被覆盖。对照入口引用的 36 个静态及尺寸组合路径均存在，两张参考图与所选原始设计图字节一致。范围、旧包保留和最终启动匹配检查保存在 `final-review.json`。
+
+final result: passed
+
+---
+
+## 2026-10-08：Slint A／B／C 界面改造
+
+本节对应当前 Slint + Rust 工作区，基于用户已存在、尚未提交的原生迁移成果实施。下载采用 A 紧凑工作台，设置采用 B 宽松卡片，更新、关于和完成提醒采用 C 分区布局。版本仍为 0.2.3；不提交、推送、创建安装包或公开发布。下面的 Vue/Tauri 记录仅为历史阶段证据。
+
+### 实现范围与边界
+
+- 下载队列、新建下载、线路检测三个模块；设置中的下载设置、窗口与提醒、收藏检查、数据管理、软件更新与关于五个模块；更新模态层、独立关于窗口、独立完成提醒小窗。
+- 保留顶部下载／历史／收藏／设置、既有云下载标识、系统窗口装饰、默认 1040×740、最小 720×520。历史和收藏只继承公共控件外观。
+- 队列总数直接使用全库 `Snapshot.total_tasks`，执行中按 `TaskStatus::running()` 计算，排队与等待恢复单独统计。结束记录仍只显示最近 50 条。详情使用来源、保存位置、下载量和累计执行耗时的独立展示字段。
+- 内容宽度达到 1000px 的队列显示完整表格；窄屏显示两行任务，次要字段进入展开详情。新建、设置和更新弹窗正文分别滚动，标题及底部操作固定。
+- 设置中的托盘、提醒和收藏更新预览均标注为功能示意；不新增图片中的地区线路、私有仓库、搜索、安装器或虚构技术栈。图形仅使用既有 SVG 与 Slint 组件，不加载在线素材。
+- 下载核心、数据库、依赖及锁文件不变。限速输入、滑块与不限速状态在现有展示适配层联动；恢复默认仍只修改草稿，保存失败保留输入。更新提交阶段拦截键盘，禁用但仍保留焦点的公共按钮也不能响应回车。
+- `package-native-windows.ps1` 新增可选 `-OutputDirectory`，默认仍为 `artifacts/slint-retirement/package`。本轮使用 `artifacts/style-abc-review/package`，独立保留旧试用程序和正式数据。
+
+### 对照与截图
+
+对照入口：`artifacts/style-abc-review/index.html`。用户的 10 张原图按字节复制到 `references/`，没有编辑原图。81 张软件截图位于同目录下的 `ui-renders/`，来自真实 Slint 组件、软件测试后端、临时 SQLite 数据库与回环 HTTP fixture；样例不代表真实网络下载已经通过。另有 6 张最终 exe 的本机 Windows 截图位于 `native-captures/`，与软件渲染截图分别列出。
+
+| 页面 | 对照截图前缀 | 覆盖尺寸 |
+| --- | --- | --- |
+| 下载队列 | `downloads`、`queue-statuses`、`queue-empty`、`queue-recovery`、`queue-details` | 1448×1086、1040×740、720×520 |
+| 新建下载 | `new-download-0/1/2`、`repository-populated`、`batch-preview` | 同上 |
+| 线路检测 | `diagnostics` | 同上 |
+| 设置五页 | `settings-0/1/2/3/4`，另有长说明与导出操作 | 同上 |
+| 更新弹窗 | `update-dialog`；另有 `update-duplicate-1040x740` | 同上 |
+| 关于窗口 | `about` | 三种尺寸及独立窗口的 660×520、最小 480×360 |
+| 完成提醒 | `completion-380x170` | 固定 380×170 |
+| 历史与收藏 | `history`、`history-pagination`、`favorites`、`favorites-cards` | 三种主窗口尺寸 |
+
+软件截图不包含系统标题栏，不代表 DPI、输入法、多显示器和干净 Windows 验收。窄窗口的长表单按设计在正文区域滚动，截图首屏不展示全部设置；保存、恢复默认、预览与确认等固定操作均有可达性断言。
+
+### 发现与修正
+
+1. 手工分栏区域缺少显式起点，Slint 自动居中造成版本列表、设置示意或详情互相覆盖。补齐定位，增加宽屏和窄屏双栏分离断言；测试后端只枚举可见元素，窄屏检查先滚动获取两块区域的句柄。
+2. 线路检测地址输入框分配到过多高度。固定为 42px，让空间留给结果列表。
+3. 更新提交期间，已禁用且仍保留焦点的按钮可能响应回车。公共按钮再次检查禁用/等待状态，提交中的模态层吞掉键盘输入；Tab、Shift+Tab、Esc 与提交保护测试通过。
+4. 原始不限速显示只比较字符串 `"0"`，会与有效输入 `"0.0"` 或空白包围的零不一致。显示状态改为从同一数值输入派生。实际 Windows 窗口还发现单向绑定在控件操作后断开，已改为与展示状态双向绑定，并补充“操作开关／滑块后再输入 0”的控件级断言；滑块填充条固定从左端开始。`settings-limit-custom` 与 `settings-limit-reset` 记录两种状态。
+5. 沙箱下规范化临时目录出现 `拒绝访问。 (os error 5)`，受影响的是已有服务/路径测试与 Rust 工具；在正常权限下重跑同一离线命令通过，没有放宽路径检查或测试断言。
+6. 最后新增的控件断言有一处 Rust 换行格式不符，按检查结果调整后 `cargo fmt --all -- --check` 通过。
+
+### 自动化验收
+
+| 实际命令 | 结果 |
+| --- | --- |
+| `.\scripts\native-cargo.ps1 -CargoArguments @('test','-p','githubsp-native','--locked','--offline')` | 16 项通过 |
+| `.\scripts\native-cargo.ps1 -CargoArguments @('test','--workspace','--locked','--offline')` | 核心 95 项、原生 16 项通过；文档测试 0 项 |
+| `.\scripts\native-cargo.ps1 -CargoArguments @('clippy','--workspace','--all-targets','--locked','--offline','--','-D','warnings')` | 通过 |
+| `cargo fmt --all -- --check` | 通过 |
+| `.\scripts\package-native-windows.ps1 -Offline -OutputDirectory 'artifacts/style-abc-review/package'` | 通过；独立免安装产物，运行依赖及 PE 导入检查通过 |
+| `.\scripts\test-native-startup.ps1 -Executable '.\artifacts\style-abc-review\package\GitHubSP-v0.2.3-windows-x64.exe'` | 通过；中文隔离目录、第二实例退出、原实例存活、正常保存退出 |
+| `git diff --check` | 通过；另按修改前字节基线检查未跟踪原生文件的差异，未发现空白错误 |
+
+UI 验证包括 64 条全库记录与 51 条列表工作集、全部任务状态统计、空列表、未知大小、长文件名、失败/恢复/换线提示、独立草稿、附件选择、预览和创建结果、过期响应、非法限速定位、保存失败保留、恢复默认需保存、固定操作与滚动可达性。关于窗口逐页拼接真实内嵌的 314 页声明并与完整文件比较，验证分页边界；完成窗口保留停留事件，8 秒、后台过滤和连续合并继续由核心通知测试覆盖。
+
+### 打包和原生烟雾检查
+
+- 产物：`artifacts/style-abc-review/package/GitHubSP-v0.2.3-windows-x64.exe`，50,114,048 字节，版本 0.2.3。
+- SHA-256：`F2D378A62F3CAF6EB7067D86215F38DE06C794526E8932AC0B3ACE33D94D2A4D`。摘要及构建边界保存在同目录的 `SHA256SUMS.txt`、`acceptance.json`。
+- 原生烟雾报告：`artifacts/style-abc-review/startup-result.json`，由既有脚本的 `artifacts/slint-retirement/startup-20261008-132712/result.json` 按字节复制。被检查程序摘要与最终 exe 一致；未检测到脚本列出的外部运行库模块。该报告只证明当前开发机的隔离启动条件。
+- 最终 exe 的 Computer Use 核对使用独立 `native-visual-data/`：下载空队列、限速开关／滑块／数值交互后回到 0、设置模块切换与正文滚动、固定保存区、关于窗口打开、许可证第 1 页到第 2 页、关闭关于和主窗口。主窗口截图含系统边框为 1042×771，关于窗口为 662×551；客户端尺寸分别为 1040×740 与 660×520。试用进程已关闭，未操作正式数据库或发起真实下载。
+- 旧试用 exe 摘要仍为 `D3401FFCFC7392D32F53FCA78F4B56A5308C20469BE20107405151178B066A36`。重新生成的第三方声明与修改前字节一致，核心、依赖及锁文件无本轮修改。
+
+尚未执行的真实网络、干净系统、中文输入法、多档 DPI、多显示器、托盘／提醒焦点实机回归和资源收益均不记为通过。完成提醒、更新弹窗的当前证据为测试后端与核心测试；没有据此声称通过上述 Windows 场景。
+
+### 项目记忆与范围复核
+
+读取 README、本文历史记录、资源说明和外部历史记忆，当前 Cargo、源码及构建入口确认已是 Slint；旧 Vue/Tauri 记录保留历史标识。没有独立项目记忆文件，未新增记忆体系。本轮在 README 同步 A／B／C 布局、统计与展示字段、数值限速、窗口边界和可选打包目录，在本文记录当前验证证据。外部历史记忆不作当前架构依据，也未改写。
+
+本轮修改前对 67 个相关文件保存字节基线，既有 `.gitignore` 改动、Vue/Tauri 删除项和未提交原生迁移均保留。基线、对照页、截图、日志与试用包位于被忽略的 `artifacts/style-abc-review/`，不混入源码。正式数据没有用于本轮测试。
+
+---
+
+## 历史阶段：2026-10-06 至 2026-10-07 Vue/Tauri
 
 本文记录 2026-10-06 至 2026-10-07 首次公开发布前的界面重构验收。下文的 Git 状态、未配置发布源及未构建桌面程序等描述仅对应当时阶段；当前构建与发布方式以 README 为准。引用的 `artifacts/` 和 `.cache/` 文件属于维护者本地历史证据，不随源码或 Release 源码包分发。
 
