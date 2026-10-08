@@ -68,7 +68,7 @@ export component AboutWindow inherits Window {
         }
         HorizontalLayout {
             height: 62px; spacing: 10px;
-            for item in [{title: "当前版本", value: "v0.2.3"}, {title: "技术栈", value: "Rust + Slint"}, {title: "开源许可", value: "MIT License"}]: Panel {
+            for item in [{title: "当前版本", value: "v0.2.4"}, {title: "技术栈", value: "Rust + Slint"}, {title: "开源许可", value: "MIT License"}]: Panel {
                 VerticalLayout { padding: 12px; spacing: 5px; Muted { text: item.title; font-size: 11px; } Label { text: item.value; font-size: 13px; font-weight: 600; } }
             }
         }
