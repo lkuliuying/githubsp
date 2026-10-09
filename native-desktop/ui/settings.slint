@@ -177,7 +177,7 @@ component UpdateSettings inherits VerticalLayout {
     vertical-stretch: 0; spacing: 18px;
     SettingCard {
         title: "GitHubSP"; description: "简单、稳定的 GitHub 资源下载工具"; icon: @image-url("../resources/icons/CloudArrowDown-fill.svg");
-        HorizontalLayout { Label { text: "当前版本"; font-weight: 600; horizontal-stretch: 0; } Badge { text: "v0.2.6"; } Rectangle { horizontal-stretch: 1; } if Updates.latest != "": Badge { text: Updates.latest; tone: 1; } }
+        HorizontalLayout { Label { text: "当前版本"; font-weight: 600; horizontal-stretch: 0; } Badge { text: "v0.2.7"; } Rectangle { horizontal-stretch: 1; } if Updates.latest != "": Badge { text: Updates.latest; tone: 1; } }
         Muted { text: "上次检查：" + Updates.checked; wrap: word-wrap; }
         Message { text: Updates.message; success: Updates.available; }
         HorizontalLayout {
@@ -290,7 +290,7 @@ export component UpdateDialog inherits FocusScope {
         x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2;
         VerticalLayout {
             padding: 24px; spacing: 16px;
-            Heading { title: "下载新版"; description: "选择版本并下载更新程序 · 当前 v0.2.6"; icon: @image-url("../resources/icons/DownloadSimple-regular.svg"); page: true; }
+            Heading { title: "下载新版"; description: "选择版本并下载更新程序 · 当前 v0.2.7"; icon: @image-url("../resources/icons/DownloadSimple-regular.svg"); page: true; }
             Rectangle { height: 1px; background: Theme.border; }
             ScrollView {
                 content-width: self.visible-width;
