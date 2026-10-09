@@ -11,6 +11,7 @@ pub mod model;
 pub mod network;
 pub mod notice;
 pub mod preflight;
+pub mod relocation;
 mod route_policy;
 pub mod source;
 pub mod store;

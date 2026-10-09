@@ -1088,6 +1088,82 @@ async fn shutdown_flushes_progress_and_restart_waits_for_user() {
     restarted.shutdown().await.unwrap();
 }
 
+#[tokio::test]
+async fn data_directory_migration_preserves_active_and_queued_downloads_and_resumes_original_parts()
+{
+    let fixture = Fixture::new(Mode::Slow, 2 * 1024 * 1024).await;
+    let root = tempfile::tempdir().unwrap();
+    let source = root.path().join("旧 数据");
+    let target = root.path().join("新 数据");
+    let downloads = root.path().join("下载");
+    let queued = downloads.join("排队");
+    for path in [&source, &target, &queued] {
+        std::fs::create_dir_all(path).unwrap();
+    }
+    let manager = Manager::start(
+        &source.join("tasks.sqlite3"),
+        fixture.engine(),
+        Arc::new(|_| {}),
+    )
+    .unwrap();
+    manager
+        .create(SOURCE.into(), downloads.clone())
+        .await
+        .unwrap();
+    manager.create(SOURCE.into(), queued).await.unwrap();
+    wait_for(&manager, |s| s.tasks[0].downloaded > 0).await;
+    // 目录预检查必须可在数据库仍打开时执行，不能直接读取被 SQLite 占用的文件。
+    crate::relocation::validate_target(&source, &target).unwrap();
+    let stopped = manager.shutdown().await.unwrap();
+    assert!(stopped.tasks.iter().all(|t| t.status == TaskStatus::Paused));
+    let first = &stopped.tasks[0];
+    let offset = first.downloaded;
+    assert!(offset > 0);
+    let partial = downloads.join(format!(".githubsp-{}", first.id));
+    assert!(partial.exists());
+    let locations = crate::relocation::Locations {
+        default_directory: source.clone(),
+        config_file: root.path().join("location.json"),
+    };
+    locations.migrate(&source, &target, false).unwrap();
+    locations.verify_before_start().unwrap();
+    let restarted = Manager::start(
+        &target.join("tasks.sqlite3"),
+        fixture.engine(),
+        Arc::new(|_| {}),
+    )
+    .unwrap();
+    let restored = restarted.snapshot().await.unwrap();
+    assert_eq!(restored.tasks.len(), 2);
+    assert!(restored
+        .tasks
+        .iter()
+        .all(|t| t.status == TaskStatus::Paused));
+    assert_eq!(restored.tasks[0].downloaded, offset);
+    assert_eq!(restored.tasks[0].directory, first.directory);
+    locations.mark_started().unwrap();
+    locations.finish().unwrap();
+    assert!(!source.exists());
+    assert!(partial.exists());
+    restarted
+        .action(first.id.clone(), Action::Resume)
+        .await
+        .unwrap();
+    wait_for(&restarted, |s| s.tasks[0].status == TaskStatus::Completed).await;
+    assert!(downloads.join("file.bin").exists());
+    assert!(fixture
+        .requests
+        .lock()
+        .unwrap()
+        .iter()
+        .any(|v| v.starts_with(&format!("{offset}-"))));
+    assert_eq!(
+        restarted.snapshot().await.unwrap().tasks[1].status,
+        TaskStatus::Paused
+    );
+    restarted.shutdown().await.unwrap();
+}
+
 #[test]
 fn recovers_abrupt_exit_and_preserves_unrecognized_temporary_files() {
     let directory = tempfile::tempdir().unwrap();

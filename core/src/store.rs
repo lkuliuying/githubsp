@@ -98,6 +98,81 @@ fn write_record(connection: &Connection, record: &StoredTask, insert: bool) -> R
 }
 
 impl Store {
+    pub(crate) fn require_existing(path: &Path) -> Result<()> {
+        let connection = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+        connection.busy_timeout(std::time::Duration::from_secs(5))?;
+        let version: u32 = connection.pragma_query_value(None, "user_version", |row| row.get(0))?;
+        if version == 0 {
+            return Err(DownloadError::new(
+                ErrorKind::Storage,
+                "保存的数据位置中没有已初始化的应用数据库，不会创建空库",
+            ));
+        }
+        connection.close().map_err(|(_, error)| error.into())
+    }
+
+    /// 迁移只读已完成初始化的库，禁止在路径错误时创建空库。
+    pub fn validate_database(path: &Path) -> Result<()> {
+        let store = Self::open_readonly(path)?;
+        Self::check_integrity(&store.connection)?;
+        store.settings()?;
+        store.favorites()?;
+        let mut statement = store.connection.prepare(
+            "SELECT id,created_at,payload,status,search_text,queue_position FROM tasks ORDER BY id",
+        )?;
+        let mut rows = statement.query([])?;
+        while let Some(row) = rows.next()? {
+            decode(row)?;
+        }
+        drop(rows);
+        drop(statement);
+        store.close()
+    }
+
+    /// 复制一致性快照后逐行比较持久化内容，不依赖数据库文件的物理布局。
+    pub fn copy_database(source: &Path, target: &Path) -> Result<()> {
+        Self::validate_database(source)?;
+        let source = Self::open_readonly(source)?;
+        source.export_backup(target, &|| false)?;
+        let target = Self::open_readonly(target)?;
+        for sql in [
+            "SELECT id,created_at,payload,status,search_text,queue_position FROM tasks ORDER BY id",
+            "SELECT key,value FROM settings ORDER BY key",
+            "SELECT repository,payload FROM favorites ORDER BY repository",
+            "SELECT id,revision FROM githubsp_storage_meta ORDER BY id",
+            "SELECT id FROM githubsp_dirty_tasks ORDER BY id",
+        ] {
+            let mut left = source.connection.prepare(sql)?;
+            let mut right = target.connection.prepare(sql)?;
+            let columns = left.column_count();
+            let mut left = left.query([])?;
+            let mut right = right.query([])?;
+            loop {
+                match (left.next()?, right.next()?) {
+                    (None, None) => break,
+                    (Some(a), Some(b)) => {
+                        for index in 0..columns {
+                            if a.get_ref(index)? != b.get_ref(index)? {
+                                return Err(DownloadError::new(
+                                    ErrorKind::Integrity,
+                                    "迁移前后的数据库记录不一致，原数据已保留",
+                                ));
+                            }
+                        }
+                    }
+                    _ => {
+                        return Err(DownloadError::new(
+                            ErrorKind::Integrity,
+                            "迁移前后的数据库记录不一致，原数据已保留",
+                        ))
+                    }
+                }
+            }
+        }
+        target.close()?;
+        source.close()
+    }
+
     pub fn close(self) -> Result<()> {
         self.connection.close().map_err(|(_, error)| error.into())
     }
