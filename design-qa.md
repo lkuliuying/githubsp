@@ -1,5 +1,130 @@
 # 界面设计与验收
 
+## 2026-10-09：v0.2.6 发布验收与本地目录规范
+
+用户已验收下节方案 1 的试用 EXE，并授权发布最新源码和 Windows x64 免安装程序。本版统一 workspace、两个本地包及主窗口、设置、更新弹窗、关于窗口的当前版本为 `0.2.6`。保留直链与确认页的紧凑双栏、状态汇总、窄窗堆叠和固定操作，不改公共接口、数据库结构或下载规则。兼容构建脚本的固定提交、旧版源码标识和第三方依赖版本保留。
+
+### 本地验证结果
+
+本轮证据根目录为 `artifacts/releases/v0.2.6/audit/`。开工前保存完整 Git 状态、补丁、146 个源码文件的摘要与字节副本；原有界面、兼容脚本和文档改动均保留。
+
+| 实际命令或检查 | 观察结果 |
+| --- | --- |
+| `.\scripts\native-cargo.ps1 -CargoArguments @('test','--workspace','--locked','--offline')` | 默认并行、默认输出捕获：108 项核心测试、16 项桌面测试通过，无失败、过滤或忽略；文档测试 0 项。证据 `workspace-tests-initial.log`。 |
+| `.\scripts\native-cargo.ps1 -CargoArguments @('clippy','--workspace','--all-targets','--locked','--offline','--','-D','warnings')` | 通过；`clippy.log`。 |
+| `cargo fmt --all -- --check`、`git diff --check` | 通过；保留现有格式约定，无仓库范围重新格式化。 |
+| `.\scripts\package-native-windows.ps1 -Offline -OutputDirectory 'artifacts/releases/v0.2.6'` | Release 构建、280 个运行依赖节点的声明生成、运行依赖树和 PE 导入检查通过；`package.log`。 |
+| `.\scripts\test-native-startup.ps1 -Executable '.\artifacts\releases\v0.2.6\GitHubSP-v0.2.6-windows-x64.exe'` | 主窗口、中文隔离目录、第二实例退出、原实例保留、正常保存退出通过；`startup.log`、`startup-result.json`。 |
+| PE 文件头、`Get-AuthenticodeSignature`、`Get-FileHash -Algorithm SHA256` | PE32+ / Windows x64 GUI，`NotSigned`；EXE、构建输出、打包清单与启动报告摘要一致，见 `artifact-verification.json`。 |
+| PowerShell 语法解析和 `cargo metadata --no-deps --locked --offline --format-version 1` | 修改脚本无语法错误；两个本地包均为 0.2.6，仅两个自身锁文件条目更新。 |
+
+最终 EXE 为 `artifacts/releases/v0.2.6/GitHubSP-v0.2.6-windows-x64.exe`，51,068,416 字节，SHA-256：`83BF722DF9814CF8BB15A1D85457E0D0FE087672B3EBC881359AE6113ABD0F92`。脚本原始启动报告位于 `artifacts/verification/startup-20261009-044348/result.json`。
+
+软件测试后端复核 1448×1086、1040×740、720×520，覆盖直链、混合预览、未知大小、全无效、百项列表、返回草稿、忙碌态和底部操作可达性；截图在 `audit/ui-renders/`。版本显示的四个位置均核对为 v0.2.6，更新弹窗中的可选目标版本属于测试样本，不替换为当前版本。
+
+最终 EXE 另以 `artifacts/verification/v026-manual-ui/中文 隔离数据/` 启动，用 Computer Use 检查真实原生窗口。默认和最小客户端分别为 1040×740、720×520；另检查最大化状态，含标题栏截图为 2048×1104。公开 v0.2.5 LICENSE 的真实目录元数据与无效域名样本形成“有效 1 项／无效 1 项”，正确显示 1.1 KB、目标目录及可用空间。窄窗可滚动到线路选择，返回与创建按钮可达；返回后批量草稿与直链草稿保留。主窗口、设置、关于显示 v0.2.6。未点击创建下载；该检查不代表完整外网下载回归。原生证据为 `audit/native-ui/` 与 `manual-ui-result.json`，交互结束后正常请求关闭并确认验收进程退出；该次外部进程句柄未提供退出码，退出码验证以启动脚本为准。
+
+此前两次 `0xc0000409` 测试进程退出在本轮默认运行中没有复现。本轮没有跳过测试、改为串行或保留临时诊断来取得通过，也不据单次通过宣称旧异常的根因已查明或修复。完整真实外网下载、原版旧 EXE 的独立 Windows 账户验收、中文输入法、多档 DPI、多显示器、干净 Windows 离线启动和同场景性能基准仍未完成。
+
+### 发布与目录入口
+
+本次发布流程为功能分组提交后提交版本文档，正常推送 `main` 和注释标签 `v0.2.6`；标签已存在或远端出现冲突时停止覆盖。源码 ZIP 使用 `git -c core.autocrlf=false archive` 从该标签导出，逐文件比较 Git blob。五个附件先上传草稿，回下载校验一致后再公开并设为 Latest。上传、公开下载及标签一致性的最终机器记录保存在本地发布审计目录，不将这些本地产物收入源码包。
+
+后续普通构建默认输出到 `artifacts/build/portable/`；兼容构建默认输出到 `artifacts/build/v024-compat/<UTC 时间戳>/`；两种构建均保留自定义输出参数。测试截图、原生 fixture、启动及测量记录默认写入 `artifacts/verification/`。源码仍按 `core/`、`native-desktop/`、`scripts/` 维护。
+
+仅在公开发布和回下载验证后清理已批准的三处编译缓存：`native-desktop/target/`、`artifacts/v024-compat/20261009-compat1/source/native-desktop/target/`、`artifacts/db-compatibility-verification/target/`。每次删除前核对绝对路径、重解析点及占用，不结束用户进程。其余 31 个历史批次整体归档，归档前已记录 1,627 个保留文件的 SHA-256，并另行保护 253 个历史发布文件；执行后核对文件数量、大小和摘要。
+
+正式发布及审计保留在 `artifacts/releases/`；独立试用包归入 `artifacts/trials/`；其余历史验证、兼容、旧缓存资料及散落旧文件依次归入 `artifacts/archive/verification/`、`compatibility/`、`legacy-cache/`、`legacy-files/`。旧记录原文中的历史路径不改写，按本地 `artifacts/INDEX.md` 和 `artifacts/path-map.json` 定位；原始报告、源码快照和测试数据库保持字节一致。实际释放字节数及归档后校验结果记录在 `audit/cleanup-result.json`。
+
+### 项目记忆同步
+
+读取并更新 README 与本文，同步当前版本、当前界面、构建默认目录、验证入口、发布约定和历史路径索引；没有独立项目记忆文件，也未新建记忆体系。当前 `core/src/store/migration.rs` 的 `VERSION=2`、`REVISION=1` 与 README 和打包清单一致；外部旧记录的 SQLite v3“当前版本”说法不适用于现行源码。历史验收章节保留发生时的事实，不将早期限制改写为已完成。
+
+---
+
+## 2026-10-09：方案 1 的免安装 EXE 试用包
+
+用户要求打包后自行试用和反馈。本轮沿用现有脚本，将当前 v0.2.5 工作区（包含下节直链与确认页的紧凑双栏调整）构建为 Windows x64 Release 免安装程序，输出到新的 `artifacts/download-confirm-trial-20261009/`。没有改动业务代码、版本号、依赖、打包规则或旧包，也没有提交、推送或发布。
+
+- EXE：`artifacts/download-confirm-trial-20261009/GitHubSP-v0.2.5-windows-x64.exe`，51,068,416 字节，PE32+ / Windows x64 GUI，签名状态 `NotSigned`。
+- SHA-256：`B7BDF8C51D6965BE503E50020B878D174D620CB3F35DBAFF2C33640EE3E2AA5D`。最终 EXE、Release 构建输出、`SHA256SUMS.txt`、`acceptance.json` 和启动验收记录一致。
+- 包内附有 `试用说明.txt`，说明退出旧版托盘实例、普通启动与 `--data-dir` 隔离试用方式，以及直链页、批量确认页和小窗口三个反馈重点。双击启动仍沿用现有默认数据目录，移动 EXE 不会移动任务数据。
+
+| 实际命令或检查 | 结果 |
+| --- | --- |
+| `.\scripts\package-native-windows.ps1 -Offline -OutputDirectory 'artifacts/download-confirm-trial-20261009'` | 通过；Release 编译、280 个运行依赖节点的声明生成、运行依赖树与 PE 导入检查通过；`audit/package.log`。 |
+| `.\scripts\test-native-startup.ps1 -Executable '.\artifacts\download-confirm-trial-20261009\GitHubSP-v0.2.5-windows-x64.exe'` | 通过；当前开发机的主窗口、中文隔离目录、第二实例退出、原实例存活和正常保存退出；`audit/startup.log`。 |
+| `Get-FileHash -Algorithm SHA256`、`Get-AuthenticodeSignature` 和 PE 文件头读取 | 摘要一致，Windows x64 GUI 格式正确，未签名；`audit/artifact-verification.json`。 |
+| `git diff --check` 与 146 个文件摘要复核 | 通过；除本文追加打包记录，其余 145 个文件字节未变，包含重新生成的第三方声明、既有 README 改动和兼容打包脚本；`audit/final-review.json`。 |
+
+启动原始报告为 `artifacts/slint-retirement/startup-20261009-041615/result.json`，副本为试用包中的 `audit/startup-result.json`。该验收只使用新建的隔离数据，不读取正式用户数据库。此轮没有代码改动，因此不重复运行下节已通过的 16 项界面/原生测试；下节记录的两次测试进程偶发异常仍未确认触发原因，不能由本次打包和启动通过推断其已修复。完整真实网络下载、中文输入法、多档 DPI、多显示器及干净 Windows 仍待实机试用，PE 与依赖检查不代替这些验收。
+
+项目记忆检查读取 README、本文和外部历史打包记录。当前源码 `core/src/store/migration.rs` 明确为 `VERSION=2`、`REVISION=1`，与现行 README 和本包清单一致；外部历史记录中 SQLite v3 的“当前”表述已经过时，本次以核实后的源码为准。没有独立项目记忆文件，也未新建记忆体系或更改外部记忆。本轮只在本文同步可复用的试用入口、摘要、验证结果及限制，已有历史章节保留。
+
+---
+
+## 2026-10-09：直链与批量确认采用方案 1「紧凑双栏」
+
+本轮根据用户选定的第一张设计板，仅调整直链输入与共享任务确认视图。保留 Slint + Rust、现有配色与图标、默认 1040×740 和最小 720×520 窗口。下载核心、目录校验、队列执行、数据库、依赖和打包方式不变；没有提交、推送或发布。开工前已有的 README 改动及 `scripts/package-v024-compat.ps1` 保留。
+
+### 参考、实现与交互
+
+- 原始选图为 `C:/Users/likecandy/.codex/generated_images/01a11ea4-de06-7e03-97bb-809b260d1fbe/exec-5b544010-9361-4749-af99-5b6163e7b7e8.png`，按字节保存于 `artifacts/download-confirm-layout-20261009/references/selected-option-1.png`。这是一张 1024×1536 的双页面设计板，包含板外标题；对照取其中对应页面的内容比例，不把整板尺寸当成单页视口，也不声称像素完全相同。
+- `DirectDownloadContent` 左侧是链接与目录表单，右侧是浅蓝下载说明；`BatchConfirmation` 左侧是附件列表，右侧集中显示预览目录、已知大小、未知大小数量、可用空间、空间提示和线路选择。正文宽度不足 660px 时两栏上下排列。
+- 预览状态由 `sources.rs` 将已有 `BatchPreview` 数据分项映射到 `Sources`，文件行补充实际大小；有效、重复、无效分别使用绿色、琥珀色和红色，并保留文字状态。创建按钮显示有效数量，全无效或处理中禁止提交。重复条目保留“继续原任务”；返回修改保留原草稿和线路。
+- 附件列表独立滚动，外层正文右侧留出滚动区域，短窗口仍能到达下载设置。标题、状态统计、返回和创建操作固定。仓库附件与批量链接共用同一确认组件；最多 100 项、仅创建有效任务及部分失败保留输入的语义不变。
+- 截图来自真实 Slint 组件的软件测试后端，窗口为 1448×1086、1040×740、720×520，像素密度为 1。三种尺寸各有 `compact-direct-*`、`compact-confirmation-*` 和 `compact-confirmation-settings-*`；未知大小、全无效、长文本、100 项列表和末项另有截图，共 14 张本轮专项截图。文件位于上述证据目录的 `ui-renders/`。
+- 实际预览映射通过临时数据库与回环目录服务验证；用于与设计板对照的目录、可用空间和个别显示文本在断言之后固定为图例。未知大小、无效原因与已有任务标识另行校验。100 项边界使用模型注入检验渲染与滚动，不代表 100 次真实下载或外网验收。
+
+### 视觉复核与修正
+
+将所选原图与 1040×740 直链、确认截图在同轮图像输入中对照，并检查三种窗口尺寸、窄窗滚动后的设置和列表末项。
+
+| 核对面 | 结果 |
+| --- | --- |
+| 字体与层级 | 沿用 Segoe UI 与现有中文字体回退、20/24px 页面标题和 11–15px 内容层级；辅助说明不抢占主要操作。 |
+| 布局与间距 | 直链表单约占双栏可用宽度的 66%；确认设置约占 34%、最大 280px；短窗口正文滚动，底部操作可达。 |
+| 色彩与状态 | 沿用浅蓝画布、白色主面板、绿色主按钮；有效/重复/无效配合图标和文字，标签固定为紧凑宽度。 |
+| 图标与资源 | 复用现有 Phosphor SVG，包括文件、链接、广播、列表与状态图标；没有新增生成插画、在线素材或公共主题修改。 |
+| 内容与行为 | 目录来自预览的规范化路径，未知大小明确标注，空间告警保留。长错误与长目录换行，长文件名遵循现有省略规则。 |
+
+修正了初次双栏实现未显式设置起点造成的重叠，并用区域分离断言复核。新增重复场景暴露测试种子目录未按实际创建路径规范化，现只修正 fixture，使其与真实预检一致；目录与去重的生产逻辑不改。嵌套列表导致测试工具默认中心滚动落入内层列表，现测试通过右侧正文留白发送实际滚轮事件，验证外层设置可达；没有直接改写内部滚动偏移或放松可见性断言。
+
+已接受差异：原生窗口保留既有应用外壳和字体；参考图中的装饰性底部勾选不新增为功能开关。重复任务的“继续原任务”保留现有按钮尺寸并另起一行；大小与未知值遵循真实数据，不照抄设计板数字。窄窗无对应生成参考，按现有最小尺寸与滚动规则验证。未发现剩余 P0/P1/P2 视觉问题。
+
+### 验证与证据范围
+
+截图输出环境变量为 `$env:GITHUBSP_UI_RENDER_DIRECTORY = 'F:\Program\githubsp\artifacts\download-confirm-layout-20261009\ui-renders'`，仅影响测试证据输出。
+
+| 实际命令 | 观察结果 |
+| --- | --- |
+| `.\scripts\native-cargo.ps1 -CargoArguments @('check','-p','githubsp-native','--locked','--offline')` | 通过。 |
+| `.\scripts\native-cargo.ps1 -CargoArguments @('test','-p','githubsp-native','--locked','--offline','--','ui_tests::module_pages_bind_to_core_and_remain_usable_at_supported_sizes','--exact','--nocapture')` | 界面专项 1 项通过，包含新布局与既有交互；`ui-test-diagnostic.log`。 |
+| `.\scripts\native-cargo.ps1 -CargoArguments @('test','-p','githubsp-native','--locked','--offline','--','--nocapture')` | 16 项通过；`native-tests-diagnostic.log`。 |
+| `.\scripts\native-cargo.ps1 -CargoArguments @('test','-p','githubsp-native','--locked','--offline','--','--test-threads=1')` | 16 项通过，无过滤或忽略；`native-tests-serial.log`。 |
+| `.\scripts\native-cargo.ps1 -CargoArguments @('test','-p','githubsp-native','--locked','--offline')` | 移除临时诊断后，最终默认模式 16 项通过；`native-tests-final-verified.log`。此前出现过异常退出，见下文。 |
+| `.\scripts\native-cargo.ps1 -CargoArguments @('clippy','-p','githubsp-native','--all-targets','--locked','--offline','--','-D','warnings')` | 通过；`native-clippy.log`。 |
+| `cargo fmt --all -- --check` | 通过。 |
+| `.\scripts\native-cargo.ps1 -CargoArguments @('build','-p','githubsp-native','--locked','--offline')` | 原生调试构建通过；`native-build.log`。 |
+| `.\scripts\test-native-startup.ps1 -Executable '.\native-desktop\target\x86_64-pc-windows-msvc\debug\githubsp-native.exe'` | 主窗口、中文隔离目录、第二实例退出、原实例存活和正常保存退出通过；`native-startup.log`。 |
+| `git diff --check` | 通过；LF/CRLF 提示不属于空白错误。 |
+
+初次沙箱测试中的目录规范化与回环访问被环境权限阻止，在正常权限下执行相同离线测试后这些失败不再出现。布局重叠、fixture 路径与嵌套滚动断言的失败日志均保留，按上述原因修正，没有删除或跳过测试。默认并行且捕获输出的测试进程曾两次以 `0xc0000409` 退出，Windows 事件偏移经本地 PDB 映射到 `abort + 0x35`，不能仅据退出码声称发生了已证实的栈缓冲区溢出。串行与不捕获输出的完整运行通过；临时 panic 诊断的一次完整运行也通过且没有异常记录。移除临时诊断后，最终默认模式同样 16 项通过。具体触发原因尚未证实，不将该问题归为既有问题，也不以最后一次通过宣称偶发异常已修复。
+
+原生启动记录为 `artifacts/slint-retirement/startup-20261009-035349/result.json`，对应本轮调试 exe 的 SHA-256 `14942CE1DD6A093CF2FAF1FDDC5F5C1AC84D86C47E3448261A8ED3EEDACF658F`。所有数据写入专用中文隔离目录，没有使用正式数据。此检查只证明当前开发机上的启动、单实例及退出；软件截图不代替真实外网、完整下载、输入法、DPI、多显示器或干净系统验收。没有制作新安装包或发布包。
+
+### 范围与项目记忆
+
+读取了 README、本文、资源说明和外部历史记忆；以 Cargo、Slint 与当前回调核实实际原生架构。没有独立项目记忆文件，也未新建记忆体系。本轮 README 仅在原有未提交内容上增补中英文各一条布局说明，本文追加选图、交互、证据与验证边界；历史章节保留其发生时的事实，不以本轮状态改写旧验收。没有发现需改正的当前架构矛盾。
+
+开工保存了 145 个跟踪文件与 1 个既有未跟踪脚本的摘要，以及 6 个计划文件的字节基线。本轮只修改 `downloads.slint`、`state.slint`、`sources.rs`、`ui_tests.rs`、README 和本文。`downloads.slint` 从 `RouteSummary` 至文件末尾与基线一致；排队、线路、全局主题、核心和依赖保持原状。截图、日志、参考和隔离数据均位于忽略目录，范围复核结果记录在本轮证据目录。
+
+final result: passed
+
+本结论仅针对上述范围内的视觉与交互验收；测试进程异常的限制另行记录，不能据此声称所有运行方式稳定或真实环境完整验收通过。
+
+---
+
 ## 2026-10-08：v0.2.4 发布基线
 
 用户确认新建下载选项 1、线路检测选项 2 的成品没有问题，并授权分批提交、推送、发布 v0.2.4 及发布后的目录清理。本次将既有 Slint 迁移、原生工作区和界面验收成果纳入 Git；下面各节中的 v0.2.3 试用路径、摘要和“未发布”标记仍是当时的历史状态。

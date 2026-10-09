@@ -10,40 +10,47 @@
 
 ## 简体中文
 
-面向 Windows 的 GitHub Release 附件下载工具。v0.2.5 修复数据库迁移后旧版无法启动的问题，继续采用 Slint + Rust + SQLite，提供项目附件选择、批量下载、托盘、限速、历史检索、收藏和版本检查。保留 v0.2.3 的线路自动恢复与低速换线建议、后台完成提醒、耗时统计和 Markdown 更新说明。应用界面为简体中文，默认串行下载；本文档提供中英双语说明。
+面向 Windows 的 GitHub Release 附件下载工具。v0.2.6 优化直链下载与批量任务确认布局，并保留 v0.2.5 的数据库兼容修复，继续采用 Slint + Rust + SQLite，提供项目附件选择、批量下载、托盘、限速、历史检索、收藏和版本检查。保留 v0.2.3 的线路自动恢复与低速换线建议、后台完成提醒、耗时统计和 Markdown 更新说明。应用界面为简体中文，默认串行下载；本文档提供中英双语说明。
 
 顶部三个徽章分别说明项目 MIT 许可证及 Slint、Rust 技术栈，使用无需申请的 [Shields.io 徽章](https://shields.io/badges/static-badge)，不代表安全认证或 Windows 代码签名。
 
-## v0.2.5 修复内容
+## v0.2.6 更新内容
+
+- 直链下载采用紧凑双栏：左侧填写链接和保存目录，右侧集中显示下载说明。
+- 任务确认采用附件列表与下载设置双栏，有效、重复和无效状态清晰区分；创建按钮显示有效任务数量。
+- 窄窗口自动上下排列，列表独立滚动，返回和创建按钮固定可达；保留重复任务继续、未知大小提示和返回修改草稿。
+- 保留 v0.2.5 的数据库兼容修复、串行队列与现有下载规则；统一构建、验证、试用和历史归档目录。
+
+## v0.2.5 数据库兼容修复（历史）
 
 - 修复原版 v0.2.4 将数据库升级到 v3 后，v0.2.0～v0.2.3 无法启动的问题。v0.2.5 首次运行会先生成完整备份，再转换为旧版可读写的兼容结构，保留最新任务、历史、收藏、设置和续传信息。
 - 跟踪旧版写入并在新版启动时修复状态、检索和排序索引；保留旧版遗漏的累计耗时和后台提醒设置。无法测量的旧版下载耗时标记为不完整，不补造数值。
 - 共享任务数据将等待网络状态保存为旧版认识的暂停状态，支持 v0.2.3 写入后直接切换到更早版本；每页 20 条及常驻最近 50 条结束任务的规则保持不变。
 - 能正常启动的原版 v0.2.4 可通过应用下载 v0.2.5，下载后手动启动。v0.2.0～v0.2.3 的更新入口只负责检查并打开发布页；已经启动失败的用户需从本页直接下载 v0.2.5。
-- 原版 v0.2.4 必须替换，转换后不要再运行它；出现 `duplicate column name: status` 时直接改用 v0.2.5。四个原版 exe 的隔离 Windows 账户启动验收尚未完成，已完成的存储兼容测试与桌面验收范围见下文。
+- 原版 v0.2.4 必须替换，转换后不要再运行它；出现 `duplicate column name: status` 时改用 v0.2.5，或重新下载下文的 v0.2.4 compat.1 兼容修复版。四个原版 exe 的隔离 Windows 账户启动验收尚未完成，已完成的存储兼容测试与桌面验收范围见下文。
 
 ## 使用
 
-当前源码已统一为 Slint，保留下载、历史、收藏、设置四个顶层入口。v0.2.5 发布产物位于 `artifacts/releases/v0.2.5/`，只需 `GitHubSP-v0.2.5-windows-x64.exe` 即可运行，不需要安装 GitHubSP、WebView2、Node.js 或 Python。需 Windows 10/11 x64 与兼容 DX12 的图形驱动；源码、摘要和验收记录不参与程序运行。
+当前源码已统一为 Slint，保留下载、历史、收藏、设置四个顶层入口。v0.2.6 发布产物位于 `artifacts/releases/v0.2.6/`，只需 `GitHubSP-v0.2.6-windows-x64.exe` 即可运行，不需要安装 GitHubSP、WebView2、Node.js 或 Python。需 Windows 10/11 x64 与兼容 DX12 的图形驱动；源码、摘要和验收记录不参与程序运行。
 
-2026-10-08 界面采用“下载 A：紧凑工作台／设置 B：宽松卡片／弹窗 C：分区与固定操作”，随后按选图只细化新建下载（选项 1：紧凑双栏）和线路检测（选项 2：结果列表与摘要）。旧试用包 `artifacts/slint-retirement/package/` 和 `artifacts/style-abc-review/package/` 独立保留。本轮截图对照入口为 `artifacts/download-layout-review/index.html`，上一轮完整对照仍为 `artifacts/style-abc-review/index.html`；具体检查与限制见 [设计验收记录](design-qa.md)。如需与正式数据隔离，使用绝对目录参数 `--data-dir F:\Program\githubsp\artifacts\download-layout-review\trial-data` 启动；默认启动仍使用原正式数据目录。
+v0.2.6 延续浅蓝画布、白色内容区和绿色操作按钮，采用已验收的直链与确认页紧凑双栏方案。最新截图位于 `artifacts/releases/v0.2.6/audit/ui-renders/`，已验收试用包归入 `artifacts/trials/download-confirm-trial-20261009/`，较早的整批界面资料归入 `artifacts/archive/verification/`。历史路径对照见本地 `artifacts/INDEX.md`，具体检查与限制见 [设计验收记录](design-qa.md)。可使用绝对目录参数 `--data-dir F:\Program\githubsp\artifacts\verification\manual-trial-data` 隔离试用；普通启动仍使用原正式数据目录。
 
-从 [v0.2.5 Release](https://github.com/lkuliuying/githubsp/releases/tag/v0.2.5) 下载以下文件。v0.2.3 及更早的公开附件采用旧 Vue/Tauri 架构，与本版原生源码不同：
+从 [v0.2.6 Release](https://github.com/lkuliuying/githubsp/releases/tag/v0.2.6) 下载以下文件。v0.2.3 及更早的公开附件采用旧 Vue/Tauri 架构，与本版原生源码不同：
 
 | 文件 | 用途 |
 | --- | --- |
-| [GitHubSP-v0.2.5-windows-x64.exe](https://github.com/lkuliuying/githubsp/releases/download/v0.2.5/GitHubSP-v0.2.5-windows-x64.exe) | Windows x64 免安装程序 |
-| [GitHubSP-v0.2.5-source.zip](https://github.com/lkuliuying/githubsp/releases/download/v0.2.5/GitHubSP-v0.2.5-source.zip) | 从发布标签导出的 Slint/Rust 源码，含 Cargo.lock 和资源许可证 |
-| [SHA256SUMS.txt](https://github.com/lkuliuying/githubsp/releases/download/v0.2.5/SHA256SUMS.txt) | exe、源码包和许可证文件的 SHA-256 校验值 |
-| [LICENSE](https://github.com/lkuliuying/githubsp/releases/download/v0.2.5/LICENSE) | 随分发提供的 MIT 许可证 |
-| [THIRD_PARTY_NOTICES.txt](https://github.com/lkuliuying/githubsp/releases/download/v0.2.5/THIRD_PARTY_NOTICES.txt) | 原生运行依赖、字体和图标的第三方声明 |
+| [GitHubSP-v0.2.6-windows-x64.exe](https://github.com/lkuliuying/githubsp/releases/download/v0.2.6/GitHubSP-v0.2.6-windows-x64.exe) | Windows x64 免安装程序 |
+| [GitHubSP-v0.2.6-source.zip](https://github.com/lkuliuying/githubsp/releases/download/v0.2.6/GitHubSP-v0.2.6-source.zip) | 从发布标签导出的 Slint/Rust 源码，含 Cargo.lock 和资源许可证 |
+| [SHA256SUMS.txt](https://github.com/lkuliuying/githubsp/releases/download/v0.2.6/SHA256SUMS.txt) | exe、源码包和许可证文件的 SHA-256 校验值 |
+| [LICENSE](https://github.com/lkuliuying/githubsp/releases/download/v0.2.6/LICENSE) | 随分发提供的 MIT 许可证 |
+| [THIRD_PARTY_NOTICES.txt](https://github.com/lkuliuying/githubsp/releases/download/v0.2.6/THIRD_PARTY_NOTICES.txt) | 原生运行依赖、字体和图标的第三方声明 |
 
 1. 下载 exe 和 `SHA256SUMS.txt`，用下方命令计算摘要，并与校验文件中对应文件名的一行比较；不一致时不要运行。
 2. 若旧版正在运行，先从托盘菜单选择“保存进度并退出”，再双击新版，避免单实例机制激活旧进程。
 3. 粘贴公开 GitHub 附件、仓库或版本链接，输入或选择保存目录并确认下载。手动输入的目录不存在时，提交后会询问是否新建，确认后继续原操作。完成后可打开所在目录；程序不会运行下载的文件。
 
 ```powershell
-Get-FileHash .\GitHubSP-v0.2.5-windows-x64.exe -Algorithm SHA256
+Get-FileHash .\GitHubSP-v0.2.6-windows-x64.exe -Algorithm SHA256
 Get-Content .\SHA256SUMS.txt
 ```
 
@@ -92,6 +99,7 @@ Slint 保留下载、历史、收藏、设置四个顶层入口，以进程内�
 - **下载工作台**：保留顶部四页导航，下载页左侧分为“下载队列／新建下载／线路检测”，默认显示队列。队列填满右侧剩余高度，列表独立滚动，标题和批量操作固定。内容区达到 1000px 时使用完整表格，文件名列伸展、操作列靠右；较窄时使用两行任务条目，线路、剩余时间和完整文件名可在详情查看。任务的更多按钮展开来源、目录、换线及队列排序。全部继续只处理暂停/失败任务，全部暂停处理活动、排队和等待网络恢复任务；批量操作遇到失败即停止并显示错误。清空已完成需要确认，仅移除记录。
 - **新建与预览**：保存目录由“直链下载／仓库附件／批量链接”共享，三种输入分别保留；线路检测使用独立的检测地址。仓库附件在宽内容区双栏显示，窄内容区上下排列。预览在新建模块内进入确认步骤，返回修改保留选择；全部创建成功切回队列，部分失败保留未成功的链接或附件选择。切换模块、页面或输入后，迟到的附件与目录选择结果不再覆盖当前内容。收藏浏览直接进入仓库附件，新版下载和完成提醒的“查看下载”进入队列。模块选择和草稿只保留在当前运行期间，不新增数据库配置。
 - **新建下载布局**：先输入仓库地址，再从左侧版本列表和右侧附件表选择，保存目录位于资源选择之后；正文宽度不足 660px 时上下排列。固定底栏汇总当前选择的数量和大小，跨版本选择按所选附件合计，继续沿用现有大小显示精度。版本分页位于版本列表顶部，当前版本说明位于列表底部。短窗口收起辅助副标题，正文滚动，预览和确认操作固定可达。
+- **直链与确认布局**：直链页左侧填写链接和保存目录，右侧显示下载说明；确认页左侧核对附件及有效／重复／无效状态，右侧集中显示预览时的保存目录、已知大小、未知大小项数、可用空间与下载线路。正文不足 660px 时两栏上下排列，列表独立滚动，返回与创建按钮固定在底部。状态标签保持紧凑，创建按钮显示有效任务数量；重复项保留继续原任务入口，无效项显示原因，未知大小不推断为零。仓库附件和批量链接沿用同一确认组件，目录校验、最多 100 项、仅创建有效任务及部分失败保留输入的规则不变。
 - **线路检测布局**：地址与检测入口固定在左侧结果区顶部，列表展示真实速度、状态和错误；内容宽度达到 720px 时，右侧独立显示最快结果和检测说明，窄窗口将摘要放在结果列表下方。最快名称与速度直接映射 `Snapshot`，重新检测时清空旧摘要；没有检测来源的最快摘要明确提示为历史结果。使用已有云下载、广播与链接图标，不引入示例域名、延迟或未经判定的“低速”标签。
 - **版本分页**：加载提示固定在新建模块标题栏右侧，空闲时保留占位。请求期间保留旧版本、附件和页码，成功后更新，失败保留原页并提示错误。临时等待的控件保持原有明暗且禁止重复操作；页码边界、无附件选择等原本不可用的控件仍灰显。加载提示出现或消失不改变模块和底部操作的位置，较长内容在模块内部滚动。
 - **历史**：统一关键词搜索和状态筛选、统计卡、独立滚动的记录表格与页码跳转。匹配记录数来自数据库，其余统计只代表当前页；每页仍为 20 条。删除末页最后一条记录后回到有效页。
@@ -99,11 +107,11 @@ Slint 保留下载、历史、收藏、设置四个顶层入口，以进程内�
 - **设置**：左侧分为“下载设置／窗口与提醒／收藏检查／数据管理／软件更新与关于”，右侧一次显示一个模块。底部“保存全部设置／恢复全部默认”固定可见并作用于全部设置；跨模块和页面保留草稿，非法限速会定位到下载设置，保存失败保留输入。限速输入为 0 或 0.001024–10240 MB/s；滑块用于 0–100 MB/s 的快捷调整，步长 0.25 MB/s，更高值通过输入框设置。Rust 接口和存储仍使用整数 `limitKib`，未编辑限速时原值保存；新输入换算到最近的整数 KiB/s，保存成功回显实际值。恢复默认只修改表单，点击保存后才生效；收藏自动检查间隔仍固定为 6 小时。
 - **适配与状态**：下载、设置页采用固定左侧导航与独立内容滚动，窄窗口仍保留文字导航；历史与收藏保留原有滚动方式。保留后端未就绪、加载、空记录、文件不可访问和错误状态。列表、历史及附件选择不显示常态校验标记；历史统计按任务状态显示本页下载失败数，收尾阶段显示“正在完成下载”。旧浏览器入口已删除。设置新增数据位置、打开数据目录和导出备份。
 
-参考图中的示例版本、地区线路、延迟、并发设置及自动生成源码包不代表现有产品能力。软件版本为 0.2.5，窗口按钮由原生 Windows 标题栏提供。历史视觉核对见 [design-qa.md](design-qa.md)，其中截图和日志属于维护者本地验收资料，不随源码分发；隔离浏览器验收只提供前端证据，不等同于 Windows 原生或真实网络下载验收。
+参考图中的示例版本、地区线路、延迟、并发设置及自动生成源码包不代表现有产品能力。软件版本为 0.2.6，窗口按钮由原生 Windows 标题栏提供。历史视觉核对见 [design-qa.md](design-qa.md)，其中截图和日志属于维护者本地验收资料，不随源码分发；隔离浏览器验收只提供前端证据，不等同于 Windows 原生或真实网络下载验收。
 
 ## GitHubSP 自身更新源
 
-本仓库发布的 v0.2.5 便携程序在构建时配置官方发布源 `lkuliuying/githubsp`。源码自行构建时，若未设置 `GITHUBSP_RELEASE_REPOSITORY`，点击检查仍会显示“尚未配置官方发布源”，不会发送更新请求或声称已是最新版。该变量是公开仓库标识而非密钥，只在编译时读取；`build.rs` 跟踪其变化。构建官方发布配置：
+本仓库发布的 v0.2.6 便携程序在构建时配置官方发布源 `lkuliuying/githubsp`。源码自行构建时，若未设置 `GITHUBSP_RELEASE_REPOSITORY`，点击检查仍会显示“尚未配置官方发布源”，不会发送更新请求或声称已是最新版。该变量是公开仓库标识而非密钥，只在编译时读取；`build.rs` 跟踪其变化。构建官方发布配置：
 
 ```powershell
 $previousReleaseRepository = $env:GITHUBSP_RELEASE_REPOSITORY
@@ -150,7 +158,7 @@ try {
 默认数据库为 `%LOCALAPPDATA%\com.githubsp.desktop\tasks.sqlite3`。设置显示实际位置，可打开目录或选择新文件导出备份。移动或替换 exe 不移动数据；普通用户权限即可运行。试用版的 `com.githubsp.native-prototype` 目录继续独立保留，不自动合并。开发验收使用显式绝对路径：
 
 ```powershell
-.\artifacts\releases\v0.2.5\GitHubSP-v0.2.5-windows-x64.exe --data-dir "F:\GitHubSP-验收"
+.\artifacts\releases\v0.2.6\GitHubSP-v0.2.6-windows-x64.exe --data-dir "F:\GitHubSP-验收"
 ```
 
 - **兼容数据库**：当前源码固定 `PRAGMA user_version=2` 作为旧版读写契约，另以 `githubsp_storage_meta.revision=1` 管理内部结构。保留任务 JSON、收藏、设置、恢复信息及状态、规范化检索文本、队列位置和索引；三个投影列提供默认值，兼容旧版三列写入。新版 JSON、投影和变更确认同事务提交。使用 `rusqlite = 0.39.0` bundled/backup，内嵌 SQLite 3.51.3；继续 WAL 与 `synchronous=FULL`，不放宽分片先落盘再确认检查点的顺序。[SQLite WAL 说明](https://sqlite.org/wal.html)
@@ -168,15 +176,40 @@ try {
 3. 新建原数据目录，仅将选定的一致性备份复制为 `tasks.sqlite3`。不得把旧 `tasks.sqlite3-wal` 或 `tasks.sqlite3-shm` 混入新目录。
 4. 启动支持该数据库版本的程序并核对历史、收藏和设置。成品与续传分片需位于记录中的原路径；恢复操作不会替你移动它们。
 
-v0.2.5 包含本次兼容修复。先运行 v0.2.5 完成备份和转换，此后可与 v0.2.0～v0.2.3 原版 exe 轮流使用最新记录，无需反复恢复旧备份。必须先从托盘退出当前版本，不能同时使用。原版 v0.2.4 不在兼容范围内，须用 v0.2.5 替换：其迁移逻辑会把兼容库误认作尚未升级的旧库，重复添加已有列并报 `duplicate column name: status`。这时应直接运行 v0.2.5，不要删除数据库或手动更改版本号。转换前的 v3 备份仍只能交给支持 v3 的程序。首次转换需要备份和重建表、索引的额外空间与时间；备份不自动轮换或删除。此前已丢失且没有备份的字段不能补回。
+v0.2.5 包含本次兼容修复。先运行 v0.2.5 或 v0.2.4 compat.1 完成备份和转换，此后可与 v0.2.0～v0.2.3 原版 exe 轮流使用最新记录，无需反复恢复旧备份。必须先从托盘退出当前版本，不能同时使用。原版 v0.2.4 不在兼容范围内，须用 v0.2.5 或下述 compat.1 修复版替换：其迁移逻辑会把兼容库误认作尚未升级的旧库，重复添加已有列并报 `duplicate column name: status`。这时应直接运行修复后的程序，不要删除数据库或手动更改版本号。转换前的 v3 备份仍只能交给支持 v3 的程序。首次转换需要备份和重建表、索引的额外空间与时间；备份不自动轮换或删除。此前已丢失且没有备份的字段不能补回。
+
+### v0.2.4 兼容修复版 compat.1
+
+2026-10-09 已将 [v0.2.4 发布页](https://github.com/lkuliuying/githubsp/releases/tag/v0.2.4) 的 `GitHubSP-v0.2.4-windows-x64.exe`、配套源码包和校验文件替换为 compat.1。发布 exe 与本地已验收的 `GitHubSP-v0.2.4-compat.1-windows-x64.exe` 字节一致，保留 v0.2.4 界面和功能，复用固定提交 `34a80f7e083edbdc2e2a082e9c94249d759c398d` 的完整存储修复。Cargo 版本仍为 0.2.4，关于窗口注明“数据库兼容修复版 compat.1”；更新检查可发现后续正式版，当前主线正式版为 v0.2.6。
+
+此前下载的原版 exe 需要重新下载并替换。v0.2.4 Git 标签保持不变，GitHub 自动生成的 “Source code (zip/tar.gz)” 仍对应原标签；修复版源码请使用发布附件 `GitHubSP-v0.2.4-source.zip`，其中的来源记录和说明保留本地验收构建时的状态，后续发布情况以发布页为准。
+
+| 程序 | 读取、写入同一兼容数据库 |
+| --- | --- |
+| 原版 v0.2.0～v0.2.3 | 支持；旧版存储夹具通过，隔离 Windows 账户的原版桌面验收仍待完成 |
+| 原版 v0.2.4 | 不支持，必须替换 exe |
+| v0.2.4 compat.1 | 使用与 v0.2.5 相同的兼容协议；发布附件与本地验收包一致 |
+| 正式版 v0.2.5、v0.2.6 | 使用同一兼容存储协议 |
+
+退出旧程序后，直接启动修复版并核对任务、历史、收藏和设置。无需恢复旧快照或移动下载文件；已经是兼容结构时不再进行结构转换。原版 exe 不会被自动修改，仍然不能打开兼容库。
+
+```powershell
+.\scripts\package-v024-compat.ps1 -Offline
+# 可指定新的独立目录；已有非空目录会被拒绝。
+.\scripts\package-v024-compat.ps1 -Offline -OutputDirectory 'artifacts/build/v024-compat/custom-trial'
+```
+
+默认输出到 `artifacts/build/v024-compat/<UTC 时间戳>/`，包含修复版 exe、源码 ZIP、校验值、许可证、`build-record.json` 和 `acceptance.json`。`source/` 为独立构建源码，`audit/` 为本地构建记录；源码包只包含固定源码清单及来源记录，不收入编译缓存或测试数据库。脚本要求本仓库保留固定提交；分发的源码包可直接使用其中的原生打包脚本重建，不依赖 Git 历史。构建完成不等于所有平台或真实下载验收通过，也不会自动提交、推送或发布。
 
 本项目没有独立项目记忆文件，长期结构、命令、行为和限制以本 README 为准。源码维护在 [main 分支](https://github.com/lkuliuying/githubsp/tree/main)，发布需另行授权。
 
 ## 项目目录与本地产物
 
-维护入口为根目录 `Cargo.toml`、`Cargo.lock`、`core/`、`native-desktop/` 和 `scripts/`。当前发布文件放在 `artifacts/releases/v0.2.5/`，其下 `audit/` 保存本地测试、上传校验及目录清理记录，不进入源码包。
+维护入口为根目录 `Cargo.toml`、`Cargo.lock`、`core/`、`native-desktop/` 和 `scripts/`。当前发布文件放在 `artifacts/releases/v0.2.6/`，其下 `audit/` 保存本地测试、上传校验及目录清理记录，不进入源码包。
 
-退役的 `node_modules/`、`dist/`、`src-tauri/target/`、`src-tauri/gen/`、`.cache/npm/`、`.cache/icons/` 以及无文件的旧 `src/` 目录不再参与构建，可清理。`native-desktop/target/` 是可重新生成的 Rust 构建缓存，清理后下一次构建需要重新编译。`artifacts/` 中的历史源码归档、发布包、截图及数据备份，以及 `.cache/` 中的历史交付记录仍保留；不能将整个目录当作无用缓存删除。正式应用数据位于项目目录之外，不属于项目清理范围。
+本地产物按用途管理：`artifacts/releases/` 保存全部正式发布与审计；`artifacts/trials/` 保存独立试用包；`artifacts/build/` 保存后续本地构建；`artifacts/verification/` 保存后续测试、启动和测量资料；`artifacts/archive/` 按 verification、compatibility、legacy-cache、legacy-files 保留完整历史批次。`artifacts/INDEX.md` 和 `artifacts/path-map.json` 记录旧路径到新路径的对应关系。归档不改变历史报告、源码快照或测试数据库的字节内容。
+
+`native-desktop/target/` 与经清单确认的隔离源码 `target/` 是可再生成编译缓存；清理后下次构建需重新编译。仅在发布及附件验证成功后清除明确列出的缓存，不整目录删除历史资料，不追踪重解析点、不结束用户程序。源码、许可证、Git 历史、正式数据与下载文件保留；正式应用数据位于项目之外，不属于项目清理范围。
 
 ## 原生桌面架构
 
@@ -193,7 +226,7 @@ Slint 1.18.1 + Winit + FemtoVG-WGPU 显式使用 DX12。界面与窗口留在主
 .\scripts\package-native-windows.ps1
 ```
 
-打包脚本从 Cargo 读取版本，更新内嵌许可证，编译并检查依赖树和 PE 导入。默认仍输出到 `artifacts/slint-retirement/package/`；可用 `-OutputDirectory` 指定独立目录，相对路径以仓库根目录解析。v0.2.5 发布构建使用 `.\scripts\package-native-windows.ps1 -Offline -OutputDirectory 'artifacts/releases/v0.2.5'`，输出 exe、SHA-256 和验收限制。打包脚本不生成安装包或自动发布；用户运行只需 exe。打包默认编译公开更新源 `lkuliuying/githubsp`，可用 `-ReleaseRepository owner/repo` 更换。普通源码构建未配置 `GITHUBSP_RELEASE_REPOSITORY` 时，检查更新明确提示未配置，不发起请求。
+打包脚本从 Cargo 读取版本，更新内嵌许可证，编译并检查依赖树和 PE 导入。默认输出到 `artifacts/build/portable/`；可用 `-OutputDirectory` 指定独立目录，相对路径以仓库根目录解析。v0.2.6 发布构建使用 `.\scripts\package-native-windows.ps1 -Offline -OutputDirectory 'artifacts/releases/v0.2.6'`，输出 exe、SHA-256 和验收限制。打包脚本不生成安装包或自动发布；用户运行只需 exe。打包默认编译公开更新源 `lkuliuying/githubsp`，可用 `-ReleaseRepository owner/repo` 更换。普通源码构建未配置 `GITHUBSP_RELEASE_REPOSITORY` 时，检查更新明确提示未配置，不发起请求。
 
 ## 模块边界
 
@@ -223,16 +256,16 @@ Slint 1.18.1 + Winit + FemtoVG-WGPU 显式使用 DX12。界面与窗口留在主
 cargo fmt --all -- --check
 .\scripts\package-native-windows.ps1 -Offline
 .\scripts\measure-history.ps1 -Offline
-.\scripts\test-native-startup.ps1 -Executable .\artifacts\slint-retirement\package\GitHubSP-v0.2.5-windows-x64.exe
+.\scripts\test-native-startup.ps1 -Executable .\artifacts\build\portable\GitHubSP-v0.2.6-windows-x64.exe
 ```
 
 核心测试覆盖真实本地 HTTP fixture 的暂停续传、取消、校验、同名文件、限速、恢复等待、换线确认及退出保存；迁移测试覆盖 v1/v2、两种来源的 v3、WAL、一致性备份、损坏/未知内部修订、容量不足和事务回滚。历史测试覆盖中文/大小写/字面子串搜索、全部状态、同时间排序、末页删除、按 ID 操作及超出 50 条的清理和提醒。
 
 `core/src/store/fixtures/` 固定保存发布标签的模型和存储代码及 Git blob 标识；v0.2.0～v0.2.2 两份文件完全相同，v0.2.3 使用另一组。测试仅适配模块引用及当前 rusqlite 整数绑定，验证新版→旧版→新版、旧版之间直接切换、设置、收藏、检查点、字段缺失与显式清空、触发器递归及失败原子性。夹具使用当前 SQLite 驱动，不等同于四个原始 exe 的桌面启动验收；原始 exe 须在隔离 Windows 测试账户中验收，不能改动正式数据目录。
 
-Slint 测试使用临时数据库、回环目录服务和软件测试后端，覆盖四页、64 条历史、模块与输入草稿、批量预览、创建结果呈现、过期查询、设置保存与失败保留、更新弹窗与安全 Markdown；以 1448×1086、1040×740 和 720×520 检查队列、双栏不重叠、模块、详情和固定操作可达性，图片位于 `artifacts/style-abc-review/ui-renders/`。此外覆盖全库统计与列表上限的差异、限速联动、弹窗 Tab／Shift+Tab／Esc 和提交保护、完整许可分页与完成小窗停留事件。目录确认、重复操作、更新边界的核心断言迁入或保留在 Rust 测试中，旧框架专属测试已删除。
+Slint 测试使用临时数据库、回环目录服务和软件测试后端，覆盖四页、64 条历史、模块与输入草稿、批量预览、创建结果呈现、过期查询、设置保存与失败保留、更新弹窗与安全 Markdown；以 1448×1086、1040×740 和 720×520 检查队列、双栏不重叠、模块、详情和固定操作可达性，图片位于 `artifacts/archive/verification/style-abc-review/ui-renders/`。此外覆盖全库统计与列表上限的差异、限速联动、弹窗 Tab／Shift+Tab／Esc 和提交保护、完整许可分页与完成小窗停留事件。目录确认、重复操作、更新边界的核心断言迁入或保留在 Rust 测试中，旧框架专属测试已删除。
 
-测试专用环境变量 `GITHUBSP_UI_RENDER_DIRECTORY` 可指定截图目录，未设置时保持上述默认路径。本轮设为绝对路径 `F:\Program\githubsp\artifacts\download-layout-review\ui-renders`，保留上一轮截图；新增跨版本大小汇总、分页失败保留、最快摘要重置、历史检测标识及长错误文本的布局验收。该变量不参与正式程序行为。
+测试专用环境变量 `GITHUBSP_UI_RENDER_DIRECTORY` 可覆盖截图目录，默认输出到 `artifacts/verification/ui-renders/`；原生 fixture 输出到同一验证根目录。本轮发布截图独立写入 `artifacts/releases/v0.2.6/audit/ui-renders/`，覆盖三种窗口尺寸、直链与确认双栏、未知大小、无效链接、百项列表、返回修改及既有分页和设置流程。该变量不参与正式程序行为。
 
 `measure-history.ps1` 分别用新进程测量 1 千、1 万、10 万条完成记录和固定 3 条未完成任务，断言常驻 53 条、页内至多 20 条，记录启动、分页、搜索时间和 Windows 私有字节；它只测核心，不包含 Slint/GPU 或旧 WebView 对比。完整资源验收仍需同机器、同数据、同 DPI、同窗口和相同下载状态，对完整进程树测空闲、传输、托盘与提醒；30% 内存下降仍是验收目标，不是已经取得的结果。`scripts/measure-process-tree.ps1` 保留用于这种进程树采样。
 
@@ -241,7 +274,7 @@ Slint 测试使用临时数据库、回环目录服务和软件测试后端，�
 真实网络验收使用独立目录（以下命令会下载公开附件）：
 
 ```powershell
-.\scripts\native-cargo.ps1 -CargoArguments @('run','-p','githubsp-core','--example','verify_download','--locked','--','https://github.com/rakanki911/DLSS5-Swapper/releases/download/v2.2.9/DLSS5-Swapper-Setup-2.2.9.exe','artifacts/acceptance/下载验证')
+.\scripts\native-cargo.ps1 -CargoArguments @('run','-p','githubsp-core','--example','verify_download','--locked','--','https://github.com/rakanki911/DLSS5-Swapper/releases/download/v2.2.9/DLSS5-Swapper-Setup-2.2.9.exe','artifacts/verification/acceptance/下载验证')
 ```
 
 `verify_v2` 保留历史命名，用 Backup API 只读复制 v1 验收库后转换至当前兼容结构，再执行隔离批量下载；不得对正式库直接试验。历史规模样本以原始 SQL 批量写入后先完成索引修复，再独立计时正常启动。截图、测试数据库、源码归档、资源结果与构建缓存都放在忽略目录。测试、静态导入审计、真实下载和干净 Windows 桌面验收是不同证据；未执行项不记为通过。
@@ -262,23 +295,30 @@ Slint 测试使用临时数据库、回环目录服务和软件测试后端，�
 
 ## English
 
-GitHubSP v0.2.5 is a Windows desktop downloader for public GitHub Release assets, built with Slint, Rust, and SQLite. Version v0.2.5 fixes database compatibility after the native desktop migration. It provides release browsing, asset selection, batch previews, a system tray, bandwidth limits, searchable history, favorites, and update checks. Route recovery, confirmation-based route suggestions, background completion notices, elapsed-time statistics, and Markdown notes from v0.2.3 are retained. The application UI is in Simplified Chinese; this README is bilingual. Downloads run sequentially by default.
+GitHubSP v0.2.6 is a Windows desktop downloader for public GitHub Release assets, built with Slint, Rust, and SQLite. Version v0.2.6 refines direct-link and batch-confirmation layouts while retaining the v0.2.5 database compatibility fix. It provides release browsing, asset selection, batch previews, a system tray, bandwidth limits, searchable history, favorites, and update checks. Route recovery, confirmation-based route suggestions, background completion notices, elapsed-time statistics, and Markdown notes from v0.2.3 are retained. The application UI is in Simplified Chinese; this README is bilingual. Downloads run sequentially by default.
 
 The three badges identify the project MIT license and the Slint / Rust technology stack. They use [Shields.io static badges](https://shields.io/badges/static-badge), which require no application or approval. They do not certify security or provide Windows code signing.
 
-## v0.2.5 fixes
+## v0.2.6 changes
+
+- Direct-link downloads use a compact form beside a download guide.
+- Confirmation places the file list beside destination, size, free-space and route settings; status badges distinguish valid, duplicate and invalid items, and Create shows the valid count.
+- Narrow windows stack the columns with independently scrolling lists and pinned Back/Create actions. Existing-task actions, unknown-size warnings and preserved drafts remain available.
+- The v0.2.5 storage compatibility fix, serial queue and download rules remain unchanged. Build, verification, trial and archive outputs now use dedicated directories.
+
+## v0.2.5 storage compatibility fixes (historical)
 
 - Fixes the startup failure in v0.2.0–v0.2.3 after the original v0.2.4 migrated the database to v3. Version v0.2.5 first creates a verified backup, then converts the current database while preserving newer tasks, history, favorites, settings, and resume metadata.
 - Tracks legacy writes and repairs indexed status, search, and ordering on startup. Omitted elapsed-time and background-notification fields are retained; unmeasured legacy execution is marked partial instead of inventing elapsed time.
 - Stores network-waiting tasks as paused in shared JSON so original versions can switch directly. The 20-row history pages and 50 recent terminal tasks remain unchanged.
 - A working original v0.2.4 can download v0.2.5 through its update page, followed by manual launch. Versions v0.2.0–v0.2.3 only check updates and open the release page. If startup already fails, download v0.2.5 directly from this page.
-- Replace the original v0.2.4 executable and do not run it after conversion. If it reports `duplicate column name: status`, launch v0.2.5 instead. Original-exe startup acceptance in an isolated Windows account remains pending; storage compatibility tests and desktop verification have separate scopes below.
+- Replace the original v0.2.4 executable and do not run it after conversion. If it reports `duplicate column name: status`, launch v0.2.5 or download the v0.2.4 compat.1 build described below. Original-exe startup acceptance in an isolated Windows account remains pending; storage compatibility tests and desktop verification have separate scopes below.
 
 ## Quick start
 
-Download the portable executable from [v0.2.5 Release](https://github.com/lkuliuying/githubsp/releases/tag/v0.2.5). Maintainer artifacts are under `artifacts/releases/v0.2.5/`; only `GitHubSP-v0.2.5-windows-x64.exe` is needed to run the app. The source ZIP comes from the release tag and includes Cargo.lock, fonts, icons, and licenses. Historical v0.2.3 and older assets use Vue/Tauri and are different from this native build.
+Download the portable executable from [v0.2.6 Release](https://github.com/lkuliuying/githubsp/releases/tag/v0.2.6). Maintainer artifacts are under `artifacts/releases/v0.2.6/`; only `GitHubSP-v0.2.6-windows-x64.exe` is needed to run the app. The source ZIP comes from the release tag and includes Cargo.lock, fonts, icons, and licenses. Historical v0.2.3 and older assets use Vue/Tauri and are different from this native build.
 
-The 2026-10-08 design uses compact download workspaces (A), spacious settings cards (B) and structured dialogs (C). The subsequent revision changes only New Download (selected option 1: compact version/asset columns) and Route Diagnostics (selected option 2: results with a summary sidebar). Previous packages remain under `artifacts/slint-retirement/package/` and `artifacts/style-abc-review/package/`. See `artifacts/download-layout-review/index.html` for the latest comparisons and `design-qa.md` for verification boundaries. Launch with an absolute `--data-dir` path to isolate trial data; ordinary startup still uses the existing application data directory.
+Version v0.2.6 retains the light-blue canvas, white panels and green actions with the accepted compact direct-link and confirmation layouts. Current screenshots are under `artifacts/releases/v0.2.6/audit/ui-renders/`, the accepted trial is under `artifacts/trials/download-confirm-trial-20261009/`, and older complete review batches are under `artifacts/archive/verification/`. The local `artifacts/INDEX.md` maps former paths; `design-qa.md` records acceptance boundaries. Use an absolute `--data-dir` path for isolated trials; ordinary startup retains the existing data directory.
 
 The native build targets Windows 10/11 x64 with system components and a compatible DX12 driver. UI, fonts, icons, SQLite and notices are embedded. Static CRT is requested and the package script audits direct imports: users should not need a separate WebView2, Node.js, Python or VC++ runtime installation. Clean-system offline startup remains a separate acceptance check. This build is unsigned; badges indicate technology and licensing, not security certification.
 
@@ -308,17 +348,18 @@ The four Slint pages use in-process page state. Shared styles use a light-blue b
 
 - **Download workspace:** the top-level navigation is retained. A left sidebar selects Queue, New download, or Route diagnostics, with Queue as the default. The queue fills the available height and scrolls independently beneath fixed actions. Content areas at least 1000px wide show the complete table with a stretching filename column and right-aligned actions; narrower areas use two-line task rows, with route, remaining time, and full filenames in details. Task details expose source, directory, route, and queue controls. Resume-all handles paused/failed tasks; pause-all handles active/waiting tasks. Bulk actions stop and report the first error. Clearing completed records requires confirmation and preserves files.
 - **Creation and preview:** Direct link, Repository assets, and Batch links share the destination directory while retaining separate inputs. Diagnostics has its own address field. Repository versions and assets use columns on wide content areas and stack on narrow ones. Preview replaces the editing step within the module; returning preserves selection. Complete success opens the queue, while partial failures retain unsuccessful links or asset selections. Navigation or input changes invalidate late directory and asset results. Favorites open repository assets; app-update downloads and completion notices open the queue. Navigation and drafts remain session-only and add no stored settings.
+- **Direct-link and confirmation layout:** the direct-link form places URL and destination inputs beside a short download guide. Confirmation places the file/status list beside the preview destination, known size, unknown-size count, free space, and route selector. Content narrower than 660px stacks these regions; the list scrolls independently and Back/Create actions remain pinned below. Compact status badges distinguish valid, duplicate, and invalid entries, and Create shows the valid count. Duplicate entries retain the existing-task action; errors remain visible and unknown sizes are not treated as zero. Repository assets and batch links share this view without changing directory checks, the 100-item limit, valid-only creation, or partial-failure draft preservation.
 - **Release pagination:** loading feedback occupies a reserved slot on the right of the creation-module heading, including while idle. Requests retain the previous releases, assets, and page number until success; failures keep that page and show an error. Temporarily locked controls retain their normal appearance while preventing duplicate actions; controls already unavailable because of page boundaries or empty selections remain subdued. Loading feedback does not shift the module or its fixed footer; longer content scrolls within the module.
 - **History:** shared search and status filters, summary cards, an independently scrollable table, and page navigation. The matched count comes from the backend; other statistics cover only the current page. Pages contain 20 records. Removing the last record on the last page returns to a valid page.
 - **Favorites:** card/list layouts, result filters, and sorting by last check or repository name. Labels show actual successful, failed, or pending checks without inferring updates “today” or installed versions.
 - **Settings:** the sidebar selects Download settings, Window and reminders, Favorite checks, Data management, or Updates and About. One module is shown at a time. Save all settings and Restore all defaults remain visible at the bottom and apply across modules. Drafts survive page and module switches; an invalid limit opens Download settings, and a failed save retains input. Limit input accepts 0 or 0.001024–10240 MB/s. The slider covers 0–100 MB/s in steps of 0.25 MB/s; higher limits use numeric entry. Rust interfaces and storage retain integer `limitKib`: unedited limits are preserved exactly, while new input is rounded to the nearest KiB/s and the saved value is displayed. Restoring defaults changes the draft only until saved. Automatic favorite checks retain the fixed six-hour interval.
 - **Responsive and error states:** Downloads and Settings use fixed sidebars with visible text labels and independent content scrolling, including narrow windows. History and Favorites retain their existing scrolling. Backend-not-ready, loading, empty, inaccessible-file, and error states remain visible. Download lists, history, and asset selection hide routine verification badges. History counts failed downloads by task status, and finalization displays “正在完成下载”. The browser entry has been removed. Settings expose the data directory and consistent backup export.
 
-Reference images are not promises of extra versions, regional routes, latency metrics, parallel task settings, or support for generated source archives. The app version is 0.2.5, and window controls are provided by the native Windows title bar. [design-qa.md](design-qa.md) contains the historical visual review in Chinese. Its screenshots and logs are local maintainer evidence, not distributed source. Isolated browser checks establish frontend behavior, not native Windows or real-network acceptance.
+Reference images are not promises of extra versions, regional routes, latency metrics, parallel task settings, or support for generated source archives. The app version is 0.2.6, and window controls are provided by the native Windows title bar. [design-qa.md](design-qa.md) contains the historical visual review in Chinese. Its screenshots and logs are local maintainer evidence, not distributed source. Isolated browser checks establish frontend behavior, not native Windows or real-network acceptance.
 
 ## Application update source
 
-The v0.2.5 portable executable published by this repository is built with `GITHUBSP_RELEASE_REPOSITORY=lkuliuying/githubsp`. For a source build without that variable, checking updates reports that no official source is configured, sends no update request, and does not claim the app is current. The value is a public repository identifier, not a secret. It is read at compile time, and `build.rs` tracks changes. To build with the official release source:
+The v0.2.6 portable executable published by this repository is built with `GITHUBSP_RELEASE_REPOSITORY=lkuliuying/githubsp`. For a source build without that variable, checking updates reports that no official source is configured, sends no update request, and does not claim the app is current. The value is a public repository identifier, not a secret. It is read at compile time, and `build.rs` tracks changes. To build with the official release source:
 
 ```powershell
 $previousReleaseRepository = $env:GITHUBSP_RELEASE_REPOSITORY
@@ -380,11 +421,28 @@ The default remains `%LOCALAPPDATA%\com.githubsp.desktop\tasks.sqlite3`. Setting
 3. Recreate the original directory. Copy only the selected consistent backup there as `tasks.sqlite3`; never mix old WAL/SHM files into it.
 4. Start a compatible app and verify records/settings/favorites. Downloads and parts must still be at the recorded paths.
 
-Version v0.2.5 includes this compatibility fix. Run v0.2.5 once to back up and convert the database, then alternate it with the original v0.2.0–v0.2.3 executables against current records. Exit the active version, including its tray process, before switching. The unpatched v0.2.4 executable is excluded and must be replaced with v0.2.5: it mistakes the compatible database for an older layout and attempts to add existing columns, producing `duplicate column name: status`. Run v0.2.5 directly in that case; do not delete the database or manually change its version. Pre-conversion v3 backups still require a v3-capable application. Conversion requires additional disk space and time; backups are not rotated or deleted automatically. Previously lost fields without a backup cannot be reconstructed.
+Version v0.2.5 includes this compatibility fix. Run v0.2.5 or v0.2.4 compat.1 once to back up and convert the database, then alternate with the original v0.2.0–v0.2.3 executables against current records. Exit the active version, including its tray process, before switching. The unpatched v0.2.4 executable is excluded and must be replaced with v0.2.5 or the compat.1 build below: it mistakes the compatible database for an older layout and attempts to add existing columns, producing `duplicate column name: status`. Run a fixed executable directly in that case; do not delete the database or manually change its version. Pre-conversion v3 backups still require a v3-capable application. Conversion requires additional disk space and time; backups are not rotated or deleted automatically. Previously lost fields without a backup cannot be reconstructed.
+
+### v0.2.4 compatibility build compat.1
+
+On 2026-10-09, `GitHubSP-v0.2.4-windows-x64.exe`, the source archive and the checksum file on the [v0.2.4 release page](https://github.com/lkuliuying/githubsp/releases/tag/v0.2.4) were replaced with compat.1. The published executable is byte-identical to the accepted local `GitHubSP-v0.2.4-compat.1-windows-x64.exe`. It preserves the v0.2.4 UI and features with the complete storage fix from commit `34a80f7e083edbdc2e2a082e9c94249d759c398d`. Cargo stays at 0.2.4, the About window identifies compat.1, and update checks can still discover v0.2.5. The current stable release is v0.2.6.
+
+Previously downloaded original executables must be downloaded again and replaced. The v0.2.4 Git tag is unchanged, so GitHub's automatically generated "Source code (zip/tar.gz)" archives still contain the original tagged code. Download the uploaded `GitHubSP-v0.2.4-source.zip` for the fixed source. Its provenance and documentation retain the state at the time of the local acceptance build; the release page records the subsequent publication.
+
+| Executable | Shared compatible database |
+| --- | --- |
+| Original v0.2.0–v0.2.3 | Supported by storage fixtures; original desktop acceptance in an isolated Windows account remains pending |
+| Original v0.2.4 | Unsupported; replace the executable |
+| v0.2.4 compat.1 | Same storage contract as v0.2.5; published assets match the accepted local package |
+| Published v0.2.5 and v0.2.6 | Share the same compatible storage contract |
+
+Exit the active app, launch the fixed executable, and verify tasks, history, favorites and settings. No old-snapshot restoration or downloaded-file movement is needed. Already-compatible databases require no additional structural conversion. The original executable is not modified automatically and remains incompatible.
+
+Run `.\scripts\package-v024-compat.ps1 -Offline`, optionally with `-OutputDirectory 'artifacts/build/v024-compat/custom-trial'`. The default is `artifacts/build/v024-compat/<UTC timestamp>/`; nonempty output directories are rejected. Outputs include the exe, source ZIP, checksums, licenses, `build-record.json`, `acceptance.json`, isolated `source/` and local `audit/` records. Source archives contain only the fixed source list and provenance, excluding caches and test databases. The wrapper requires the pinned commit locally; the distributed source can rebuild with its own native packaging script without Git history. Building does not imply all desktop or real-download checks passed, and never commits, pushes or publishes automatically.
 
 This README records durable architecture, commands, and limitations; there is no separate memory system. Version v0.2.4 was the first release of the current native workspace; v0.2.5 fixes database compatibility. Older design and trial records remain historical evidence.
 
-The maintained source lives in the root Cargo workspace, `core/`, `native-desktop/`, and `scripts/`. Release assets are under `artifacts/releases/v0.2.5/`; local verification records live in its `audit/` directory and are excluded from source archives. Retired frontend dependencies/output, old Tauri build caches, and current `native-desktop/target/` can be regenerated or are no longer used. Historical archives, releases, screenshots, backups, and delivery records under `artifacts/` and `.cache/` are retained. Never remove either whole directory as a cache; production application data is outside this cleanup scope.
+The maintained source remains in the root Cargo workspace, `core/`, `native-desktop/` and `scripts/`. Local outputs are grouped as `artifacts/releases/` for all releases and audits, `artifacts/trials/` for standalone trials, `artifacts/build/` for future builds, `artifacts/verification/` for future tests and measurements, and `artifacts/archive/` for complete historical verification, compatibility, cache-history and loose-file batches. The local `artifacts/INDEX.md` and `artifacts/path-map.json` map former paths. Historical reports, source snapshots and test databases retain their bytes. Only explicitly inventoried regenerable build caches are removed after publication verification; source, licenses, Git history, user data and downloaded files are preserved. Archives and audit data are excluded from source packages.
 
 ## Development and builds
 
@@ -395,7 +453,7 @@ Requires Rust 1.96+ MSVC and Visual Studio C++ Build Tools. No Node.js build cha
 .\scripts\package-native-windows.ps1
 ```
 
-Initial dependency retrieval requires network access; cached builds support `-Offline` for packaging or `--offline` in Cargo arguments. Packaging derives `GitHubSP-v<version>-windows-x64.exe` from Cargo, regenerates embedded notices, audits runtime dependencies and PE imports, and writes the exe, SHA-256 and acceptance limits under `artifacts/slint-retirement/package`. Use `-OutputDirectory` to select another directory (relative paths resolve from the repository root); the default is unchanged. It creates no installer or release. The package script compiles the public update repository `lkuliuying/githubsp`; override with `-ReleaseRepository owner/repo`. Ordinary source builds without the compile-time repository report that updates are unconfigured.
+Initial dependency retrieval requires network access; cached builds support `-Offline` for packaging or `--offline` in Cargo arguments. Packaging derives `GitHubSP-v<version>-windows-x64.exe` from Cargo, regenerates embedded notices, audits runtime dependencies and PE imports, and writes the exe, SHA-256 and acceptance limits under `artifacts/build/portable`. Use `-OutputDirectory` to select another directory (relative paths resolve from the repository root). It creates no installer or release. The package script compiles the public update repository `lkuliuying/githubsp`; override with `-ReleaseRepository owner/repo`. Ordinary source builds without the compile-time repository report that updates are unconfigured.
 
 ## Module boundaries
 
@@ -424,12 +482,12 @@ Resources and third-party notices are embedded, including Noto Sans SC and the r
 cargo fmt --all -- --check
 .\scripts\package-native-windows.ps1 -Offline
 .\scripts\measure-history.ps1 -Offline
-.\scripts\test-native-startup.ps1 -Executable .\artifacts\slint-retirement\package\GitHubSP-v0.2.5-windows-x64.exe
+.\scripts\test-native-startup.ps1 -Executable .\artifacts\build\portable\GitHubSP-v0.2.6-windows-x64.exe
 ```
 
-Core fixtures exercise pause/resume, cancellation, recovery, switching, hashes, filename protection and saved shutdown. Storage fixtures cover v1/v2, both v3 layouts, WAL backups, corruption/unknown revisions, capacity exhaustion, rollback, Unicode/literal search, stable ties, pagination, cold-record operations and cleanup. Published model/store fixtures retain Git blob provenance; v0.2.0–v0.2.2 share identical sources. Tests adapt module paths and integer bindings for the current driver and cover round trips, direct legacy switches, missing/explicit fields, checkpoints, settings, favorites, recursion and atomicity. These fixtures use the current SQLite driver and do not replace original-exe startup acceptance in an isolated Windows test account. Native tests retain directory, duplicate-action, stale-result, update pagination and safe Markdown coverage. Slint tests use isolated data, a loopback catalog fixture, and the software backend to cover module navigation, drafts, previews, submission-result rendering, stale responses, and failed-save preservation. Snapshots cover 1448×1086, 1040×740, and 720×520, written under `artifacts/style-abc-review/ui-renders/`, with additional full-count, split-layout, numeric-limit, modal keyboard, license-pagination and completion-window checks.
+Core fixtures exercise pause/resume, cancellation, recovery, switching, hashes, filename protection and saved shutdown. Storage fixtures cover v1/v2, both v3 layouts, WAL backups, corruption/unknown revisions, capacity exhaustion, rollback, Unicode/literal search, stable ties, pagination, cold-record operations and cleanup. Published model/store fixtures retain Git blob provenance; v0.2.0–v0.2.2 share identical sources. Tests adapt module paths and integer bindings for the current driver and cover round trips, direct legacy switches, missing/explicit fields, checkpoints, settings, favorites, recursion and atomicity. These fixtures use the current SQLite driver and do not replace original-exe startup acceptance in an isolated Windows test account. Native tests retain directory, duplicate-action, stale-result, update pagination and safe Markdown coverage. Slint tests use isolated data, a loopback catalog fixture, and the software backend to cover module navigation, drafts, previews, submission-result rendering, stale responses, and failed-save preservation. Snapshots cover 1448×1086, 1040×740, and 720×520, written under `artifacts/archive/verification/style-abc-review/ui-renders/`, with additional full-count, split-layout, numeric-limit, modal keyboard, license-pagination and completion-window checks.
 
-The test-only `GITHUBSP_UI_RENDER_DIRECTORY` variable overrides the screenshot directory. This revision writes to `artifacts/download-layout-review/ui-renders/` and checks selection totals across versions, failed pagination, cleared diagnostic summaries while probing, historical results and long errors. Production behavior does not use this variable.
+The test-only `GITHUBSP_UI_RENDER_DIRECTORY` variable overrides screenshots, which default to `artifacts/verification/ui-renders/`; native fixtures use the same verification root. This release writes to `artifacts/releases/v0.2.6/audit/ui-renders/` and covers three window sizes, direct-link and confirmation columns, unknown sizes, invalid links, 100-item lists, preserved drafts and existing pagination/settings flows. Production behavior does not use this variable.
 
 History scaling uses separate processes with 1k/10k/100k completed records and three unfinished tasks, asserting 53 resident tasks and at most 20 rows/page. Reports include core startup/query timing and Windows private bytes; they exclude Slint/GPU and a legacy WebView comparison. Full-process-tree idle/download/tray/notice measurements, the proposed 30% memory reduction, clean Windows offline startup, IME, DPI and multi-monitor checks remain separate acceptance work.
 
