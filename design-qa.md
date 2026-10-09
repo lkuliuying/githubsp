@@ -1,5 +1,105 @@
 # 界面设计与验收
 
+## 2026-10-09：v0.2.8 发布验收
+
+用户确认数据目录迁移试用包“没什么问题”，并授权分批提交、推送和发布 v0.2.8。先核对本地 `main` 与远端均为 `e12a1ac`，未发现已有 v0.2.8 标签或发布；22 个待提交文件均属于此前实现与试用记录。开工前在 `artifacts/releases/v0.2.8/audit/` 保存 Git 状态、完整补丁和 155 个源码文件摘要。
+
+核心迁移与测试以 `a6b5e65` 提交并推送，桌面界面、重启与相关测试以 `79182ae` 提交并推送。最后一批统一 workspace、两个本地包和四处界面版本为 `0.2.8`，同步 README 中英说明与本文。业务源码与用户试用包一致；没有升级第三方依赖、改变数据库结构或增加安装包。
+
+### 本地验证结果
+
+| 实际命令或检查 | 观察结果 |
+| --- | --- |
+| `.\scripts\native-cargo.ps1 -CargoArguments @('test','--workspace','--locked','--offline')` | 功能提交前与 v0.2.8 版本更新后各执行一次，均为 121 项核心、24 项桌面通过，文档测试 0 项。默认忽略 2 个专用入口；迁移子进程入口由父测试显式执行两次并通过，独立 DX12 完成提醒入口本轮未额外执行。记录 `workspace-tests-feature.log`、`workspace-tests.log`。 |
+| `.\scripts\native-cargo.ps1 -CargoArguments @('clippy','--workspace','--all-targets','--locked','--offline','--','-D','warnings')` | 通过；`clippy.log`。 |
+| `cargo fmt --all -- --check`、`git diff --check` | 通过；没有仓库范围格式化。 |
+| `cargo metadata --no-deps --locked --offline --format-version 1` | 两个本地包均为 0.2.8，锁文件只改变两个自身版本条目；`package-versions.json`。 |
+| `.\scripts\package-native-windows.ps1 -Offline -OutputDirectory 'artifacts/releases/v0.2.8'` | Release 构建、280 个运行依赖节点声明、运行依赖树及 PE 导入检查通过；`package.log`。 |
+| `.\scripts\test-native-startup.ps1 -Executable '.\artifacts\releases\v0.2.8\GitHubSP-v0.2.8-windows-x64.exe'` | 中文隔离数据目录、真实主窗口、第二实例退出、原实例保留、正常保存退出通过。原始报告 `artifacts/verification/startup-20261009-123419/result.json`，按字节复制到 `audit/startup-result.json`。 |
+| `dumpbin /headers`、`Get-AuthenticodeSignature`、`Get-FileHash -Algorithm SHA256` | Windows x64 / PE32+ / GUI，`NotSigned`；EXE、编译输出、打包清单、启动报告摘要一致；`artifact-verification.json`。 |
+
+最终 EXE：`artifacts/releases/v0.2.8/GitHubSP-v0.2.8-windows-x64.exe`，52,025,856 字节，SHA-256：`8EB2363E7682F8573C9E8A4C8CF33DC04F56DBFD8AEABFD73AAC44038A66B8A8`。151 个构建输入在构建前后摘要相同；155 个开工基线文件中，148 个保持原字节，其余 7 个仅为版本及发布文档更新，第三方声明未变化。
+
+软件后端回归覆盖 1448×1086、1040×740、720×520，截图独立写入 `audit/ui-renders/`。复核小窗口的当前版本显示、数据管理操作和迁移确认按钮；三种尺寸下的确认、取消、键盘焦点、忙碌及未保存设置保护通过。完整迁移及失败恢复覆盖见下方实现阶段记录，本轮同一完整测试集再次通过。
+
+首次受限环境中的格式检查出现路径规范化 `os error 5`，GitHub 查询出现代理套接字拒绝访问；获准环境中相同检查通过。额外覆盖 `core.autocrlf=false` 的工作区差异检查将 CRLF 识别为尾空白，恢复仓库既有换行规则执行标准 `git diff --check` 后通过；源码归档仍按下述规则逐字节核对。
+
+### 发布与兼容边界
+
+发布沿用正常推送 `main` 和注释标签 `v0.2.8` 的流程，不覆盖已有标签。源码 ZIP 使用 `git -c core.autocrlf=false archive` 从标签导出，逐文件比较 Git blob；EXE、源码、校验文件、MIT 许可证和第三方声明共五个附件先上传草稿，回下载核对摘要后公开为 Latest。远端分支、标签、发布状态和匿名下载的最终记录保存在本地 `audit/`，不进入源码包。
+
+用户反馈确认试用无问题，但未提供逐项手工验收清单。本轮自动证据为隔离数据测试、软件后端界面、迁移子进程和实际发布 EXE 的原生启动；没有操作正式数据库、位置配置或用户下载。干净 Windows、完整公网下载、DPI/输入法、多显示器及真实断电拔盘不据此认定通过。程序未签名；旧版 exe 不识别自定义位置配置，数据库仍为 `user_version=2`、内部修订 1。
+
+### 项目记忆同步
+
+读取并更新 README 和本文，核对发布脚本、版本配置、存储常量及测试结果；同步 v0.2.8 下载入口、迁移规则、试用确认状态、发布流程和验证范围。未发现独立项目记忆文件，未新建记忆体系。外部历史记录的 SQLite v3 描述已通过 `core/src/store/migration.rs` 的 `VERSION=2`、`REVISION=1` 和兼容测试核实为过时状态；当前说明依据源码，历史章节保留发生时的事实，未改写外部记忆。
+
+---
+
+## 2026-10-09：数据目录迁移试用包（用户已确认）
+
+按用户要求，将当前未提交的自定义数据目录功能构建为 Windows x64 Release 免安装试用程序，版本仍为 `0.2.7`。试用包阶段只生成本地产物，没有提交、推送或发布，没有修改正式数据或业务源码。用户随后确认“没什么问题”，授权按 v0.2.8 分批提交、推送和发布；正式发布验收记录见上节。
+
+- EXE：`artifacts/trials/data-directory-migration-20261009-200136/GitHubSP-v0.2.7-windows-x64.exe`，52,025,856 字节，PE32+ / Windows x64 GUI，签名状态 `NotSigned`。
+- SHA-256：`D239AB9278247C23F03DC5B9EB1B90C1013A0429DBCC9271C9D6BA98414BF2B1`。最终 EXE、Release 构建输出、`SHA256SUMS.txt`、`acceptance.json` 和启动报告一致。
+- 同目录的 `试用说明.txt` 说明退出旧版托盘实例、正常启动、备份选择、自动重启、任务继续以及旧版不识别位置配置的限制。试用永久目录修改需要正常启动；`--data-dir` 隔离运行会禁用该功能。
+
+| 实际命令或检查 | 结果 |
+| --- | --- |
+| `.\scripts\package-native-windows.ps1 -Offline -OutputDirectory 'artifacts/trials/data-directory-migration-20261009-200136'` | 通过；Release 编译、280 个运行依赖节点声明、运行依赖树和 PE 导入检查通过，记录 `audit/package.log`。 |
+| `.\scripts\test-native-startup.ps1 -Executable '.\artifacts\trials\data-directory-migration-20261009-200136\GitHubSP-v0.2.7-windows-x64.exe'` | 中文隔离数据目录、真实窗口、第二实例退出、原实例保留、正常保存退出通过；原始报告 `artifacts/verification/startup-20261009-120848/result.json`，按字节保存到包内 `audit/startup-result.json`。 |
+| `Get-FileHash -Algorithm SHA256`、`Get-AuthenticodeSignature`、`dumpbin /headers` | 文件摘要与清单、启动报告一致，Windows x64 GUI，未签名；见 `audit/artifact-verification.json` 和 `audit/pe-headers.txt`。 |
+| `git diff --check`、打包前后摘要对比 | 通过；打包后核对的 155 个源文件与开工时相同，自动生成的第三方声明字节未变；随后仅更新本文的试用记录，保留此前全部未提交功能改动。 |
+
+试用包阶段复用下节功能实现阶段已通过的 121 项核心、24 项桌面测试及静态检查，没有业务源码变化，未重复执行完整测试集。打包证据是开发机隔离启动和静态产物检查；用户随后确认试用没有发现问题，但没有提供逐项手工验收清单。干净 Windows、DPI、输入法、断电拔盘及真实网络下载不据此记为通过。验收进程已正常退出。
+
+项目记忆同步：读取 README、本文、当前打包脚本及历史打包记忆，未发现独立项目记忆文件。在本文记录产物位置、摘要、验证边界，并随用户反馈更新试用确认状态；README 已描述功能，试用包阶段没有重复修改，未新增记忆体系，未发现该阶段新增的记忆与实现不一致。
+
+---
+
+## 2026-10-09：自定义数据目录与安全迁移（实现阶段记录）
+
+本轮在 v0.2.7 工作区增加“设置 → 数据管理”的目标目录、浏览和迁移操作。校验后选择“保留备份并迁移”“不备份并迁移”或取消；普通设置仍统一手动保存，未保存修改阻止迁移。下载先保存检查点并暂停，服务和数据库连接关闭后迁移，使用同一个 exe 重启；任务保持暂停，下载成品和续传分片留在原位置。
+
+### 持久化与恢复约定
+
+- `core/src/relocation.rs` 负责目录校验、迁移阶段和清理清单，`relocation/files.rs` 负责摘要、原子配置写入和文件保护；`Store` 使用既有 SQLite Backup API 生成一致性副本并逐行核对记录。已有 `backups/*.sqlite3` 逐文件复制校验，不直接复制 WAL/SHM。
+- 固定位置 `%LOCALAPPDATA%\com.githubsp.desktop-location.json` 与可迁移目录分离，记录 `prepared`、`verified`、`switched`、`cleanup` 阶段。启动顺序为显式 `--data-dir`、保存的位置、原默认目录；显式路径绕过位置配置并禁用永久迁移。保存的位置不可用时不新建空库。
+- 桌面层停止新操作、下载调度及后台检查，等待读写连接关闭。目标目录使用进程互斥预约，旧进程退出后新进程才能启动；目录句柄防止迁移期间重命名。来源清单在复制前采集，复制后再次校验。新服务和窗口启动成功后才提交待清理阶段；此前发生复制、校验、提交或初始化失败时保留原数据并回退。
+- 错误回退必须重新取得来源和目标互斥锁并核对迁移记录，不能切走另一实例正在启用的位置；打开服务前再次检查保存的位置。已保存位置中的零字节或尚未初始化的 SQLite 数据库也明确拒绝，不作为首次运行初始化。
+- 不保留备份时，只删除清单中内容仍一致的应用文件；校验和删除使用同一受保护文件句柄，未知文件、下载成品和分片保留，目录为空才删除。清理失败继续使用新位置并显示剩余位置，下次启动重新检查；新目录投入使用后不能回退到旧副本。保留原目录的备份为静态副本，后续不自动同步。
+- SQLite 公共 `user_version=2`、内部修订 `1` 保持不变。此前发布的 exe 不认识位置配置，切回旧程序时需要明确使用同一目录，且不得并发打开同一数据库。
+
+### 实际验证结果
+
+| 实际命令 | 观察结果 |
+| --- | --- |
+| `.\scripts\native-cargo.ps1 -CargoArguments @('test','--workspace','--locked','--offline')` | 默认并行与默认输出捕获：核心 121 项、桌面 24 项通过，文档测试 0 项。桌面清单中 2 项标记忽略：已有的独立 DX12 生命周期测试本轮未运行；迁移子进程入口由父测试显式执行两次并通过。 |
+| `.\scripts\native-cargo.ps1 -CargoArguments @('test','-p','githubsp-native','ui_tests::module_pages_bind_to_core_and_remain_usable_at_supported_sizes','--locked','--offline','--','--exact','--nocapture')` | 1 项界面综合回归通过，包含三种尺寸及迁移确认、取消、键盘、忙碌和未保存设置保护。 |
+| `.\scripts\native-cargo.ps1 -CargoArguments @('test','-p','githubsp-native','data_location::tests::','--locked','--offline')` | 2 项父测试通过，子进程入口显式执行两次通过；覆盖进程等待、双端目录占用时不回退、新目录使用后不回退、清理失败保留来源并显示原位置。 |
+| `.\scripts\native-cargo.ps1 -CargoArguments @('clippy','--workspace','--all-targets','--locked','--offline','--','-D','warnings')` | 通过。 |
+| `cargo fmt --all -- --check`、`git diff --check` | 通过；没有仓库范围格式化。 |
+| `.\scripts\native-cargo.ps1 -CargoArguments @('build','--locked','--offline')` | 当前开发构建通过，没有生成 Release 发布包。 |
+| `.\scripts\test-native-startup.ps1 -Executable '.\native-desktop\target\x86_64-pc-windows-msvc\debug\githubsp-native.exe'` | 最终构建的中文隔离数据目录、真实窗口、第二实例退出、原实例保留、正常保存退出通过；报告 `artifacts/verification/startup-20261009-115845/result.json`。 |
+
+迁移测试覆盖两种备份选择、完成历史、收藏、设置、检查点、已有备份、未知文件和原下载文件保留；本地 HTTP fixture 验证正在运行及排队任务迁移后均暂停，再次继续使用原分片和 Range 偏移完成下载。另覆盖临时目录到工作区的跨卷复制、相同/嵌套/非空/文件目标、目录替换保护、来源变化与新 WAL、目标校验失败、配置写入失败、缺失重启程序、阶段中断回退及部分清理恢复。权限和空间不足包含错误注入，SQLite 容量耗尽使用现有 Backup API 故障测试；没有占满用户磁盘或修改正式目录权限。
+
+新进程验收通过测试二进制子进程注入临时配置根，实际等待前一进程退出、读取新位置、打开新数据库再清理来源；不改写正式位置配置。界面测试使用软件后端，截图位于 `artifacts/verification/ui-renders/data-directory-settings*` 和 `data-migration-confirm*`，覆盖 1448×1086、1040×740、720×520；窄窗通过正文滚动访问操作，三项确认按钮保持可见。原生启动脚本使用显式 `--data-dir`，其证据与软件界面和子进程迁移测试分开记录。
+
+### 本轮失败与修正
+
+受限沙箱下的临时目录规范化曾返回 `os error 5`，同一离线命令在获准的执行环境重跑通过，没有放宽路径检查。实现期间修正了 Slint 属性名及 Clippy 提示；最终构建和静态检查通过。新增回退断言最初将 Windows 短路径与规范化长路径直接比较，改为规范化后比较，未改变迁移行为或减少断言。
+
+一次桌面回归出现 `0xc0000409`。单独运行并打开完整输出确认本次触发链为既有本地 HTTP fixture 的 `read()` 返回 `WouldBlock`，工作线程 panic 后 `Drop` 再次 panic。对接受的连接显式设置阻塞模式，保留原有读写超时及断言，单测与后续默认完整回归通过。这个已观察到的触发链不作为历史所有同码异常的根因结论。
+
+### 边界与项目记忆
+
+没有操作正式数据库、正式位置配置、用户下载或旧包，没有新增依赖、改版本号、提交或发布。真实图形窗口中的完整迁移点击到自动重启、系统目录选择器交互、断电/拔盘、网络共享、干净 Windows、DPI 和输入法尚未作为本轮实机验收；已有证据为组件交互、核心故障注入、隔离子进程及开发机原生启动。文件同步和原子替换不等于已完成真实断电试验。
+
+读取 README、本文和相关外部历史记忆，未发现独立项目记忆文件，未新建记忆体系。依据 `core/src/store/migration.rs` 的现行常量和通过的兼容测试确认 SQLite v3 历史描述已过时；本轮在 README 中英双语同步新目录配置、备份/清理、失败恢复和旧 exe 限制，并在本文记录验证类别。外部历史记忆未改写，历史验收章节仍保留原发生时的事实。
+
+---
+
 ## 2026-10-09：v0.2.6 发布验收与本地目录规范
 
 用户已验收下节方案 1 的试用 EXE，并授权发布最新源码和 Windows x64 免安装程序。本版统一 workspace、两个本地包及主窗口、设置、更新弹窗、关于窗口的当前版本为 `0.2.6`。保留直链与确认页的紧凑双栏、状态汇总、窄窗堆叠和固定操作，不改公共接口、数据库结构或下载规则。兼容构建脚本的固定提交、旧版源码标识和第三方依赖版本保留。
