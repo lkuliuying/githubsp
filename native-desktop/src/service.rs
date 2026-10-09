@@ -12,6 +12,10 @@ use tokio::sync::watch;
 
 pub struct Service {
     pub data_directory: std::path::PathBuf,
+    pub locations: Option<githubsp_lib::relocation::Locations>,
+    pub migration_lock: std::sync::Mutex<Option<crate::platform::DirectoryLock>>,
+    pub restart: AtomicBool,
+    pub restart_message: std::sync::Mutex<Option<String>>,
     pub manager: Manager,
     pub catalog: Catalog,
     pub library: Library,
@@ -36,9 +40,13 @@ impl Service {
         // 读取请求不会触发 actor 的事件，须显式填充初始快照供托盘和关闭策略读取。
         publish(&initial, manager.snapshot().await?);
         let library = Library::new(catalog.clone(), manager.clone());
-        library.start();
+        // 主窗口和迁移提交成功后才启动收藏检查，避免回退时丢失启动期间的新写入。
         Ok(Arc::new(Self {
             data_directory: directory.to_owned(),
+            locations: None,
+            migration_lock: std::sync::Mutex::new(None),
+            restart: AtomicBool::new(false),
+            restart_message: std::sync::Mutex::new(None),
             manager,
             catalog,
             library,
@@ -49,9 +57,9 @@ impl Service {
     }
 
     pub async fn shutdown(&self) -> Result<(), String> {
-        self.manager.shutdown().await.map_err(|e| e.to_string())?;
         self.catalog.stop();
         self.library.stop();
+        self.manager.shutdown().await.map_err(|e| e.to_string())?;
         Ok(())
     }
 

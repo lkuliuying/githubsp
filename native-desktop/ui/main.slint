@@ -1,10 +1,10 @@
 import { ScrollView } from "std-widgets.slint";
 import { Theme, Label, Muted, Icon, ActionButton, Message } from "theme.slint";
-import { Workspace, Updates } from "state.slint";
+import { Workspace, Updates, Storage } from "state.slint";
 import { DownloadsPage } from "downloads.slint";
 import { HistoryPage } from "history.slint";
 import { FavoritesPage } from "favorites.slint";
-import { SettingsPage, UpdateDialog } from "settings.slint";
+import { SettingsPage, UpdateDialog, MigrationDialog } from "settings.slint";
 import "../resources/NotoSansSC-Regular.otf";
 export { CompletionWindow, AboutWindow } from "windows.slint";
 export { Workspace, Sources, History, Favorites, Preferences, Storage, Updates, TaskRow, RouteRow, ReleaseRow, AssetRow, PreviewRow, HistoryRow, FavoriteRow, NoteBlock, NoteTableRow } from "state.slint";
@@ -101,4 +101,5 @@ export component MainWindow inherits Window {
         }
     }
     if Updates.dialog: UpdateDialog {}
+    if Storage.dialog || Storage.migrating: MigrationDialog {}
 }

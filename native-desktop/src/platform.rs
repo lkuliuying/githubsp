@@ -21,10 +21,133 @@ fn wide(value: &str) -> Vec<u16> {
     value.encode_utf16().chain(Some(0)).collect()
 }
 
-pub fn data_directory() -> Result<PathBuf, String> {
-    match parse_arguments(std::env::args_os().skip(1))? {
-        Some(directory) => Ok(directory),
-        None => data_directory_default(),
+pub struct Startup {
+    pub directory: PathBuf,
+    pub locations: Option<githubsp_lib::relocation::Locations>,
+    pub state: githubsp_lib::relocation::State,
+}
+
+pub fn startup() -> Result<Startup, String> {
+    let arguments: Vec<_> = std::env::args_os().skip(1).collect();
+    let explicit = if arguments.first().is_some_and(|a| a == "--restart-after") {
+        if arguments.len() != 2 {
+            return Err("重启参数无效".into());
+        }
+        let pid = arguments[1]
+            .to_str()
+            .and_then(|v| v.parse::<u32>().ok())
+            .filter(|p| *p != 0)
+            .ok_or("重启进程标识无效")?;
+        wait_for_exit(pid)?;
+        None
+    } else {
+        parse_arguments(arguments.into_iter())?
+    };
+    resolve_directory(explicit, || {
+        let default_directory = data_directory_default()?;
+        let config_file = default_directory
+            .parent()
+            .ok_or("应用目录无父目录")?
+            .join("com.githubsp.desktop-location.json");
+        Ok(githubsp_lib::relocation::Locations {
+            default_directory,
+            config_file,
+        })
+    })
+}
+
+pub(crate) fn resolve_directory(
+    explicit: Option<PathBuf>,
+    locations: impl FnOnce() -> Result<githubsp_lib::relocation::Locations, String>,
+) -> Result<Startup, String> {
+    if let Some(directory) = explicit {
+        return Ok(Startup {
+            directory,
+            locations: None,
+            state: Default::default(),
+        });
+    }
+    let locations = locations()?;
+    let state = locations.load().map_err(|e| e.to_string())?;
+    Ok(Startup {
+        directory: locations.selected(&state),
+        locations: Some(locations),
+        state,
+    })
+}
+
+pub(crate) fn wait_for_exit(pid: u32) -> Result<(), String> {
+    use windows_sys::Win32::{
+        Foundation::{ERROR_INVALID_PARAMETER, WAIT_OBJECT_0},
+        System::Threading::{OpenProcess, WaitForSingleObject, PROCESS_SYNCHRONIZE},
+    };
+    if pid == std::process::id() {
+        return Err("不能等待当前进程退出".into());
+    }
+    let handle = unsafe { OpenProcess(PROCESS_SYNCHRONIZE, 0, pid) };
+    if handle.is_null() {
+        if unsafe { GetLastError() } == ERROR_INVALID_PARAMETER {
+            return Ok(());
+        }
+        return Err(format!(
+            "无法等待旧进程退出：{}",
+            std::io::Error::last_os_error()
+        ));
+    }
+    let result = unsafe { WaitForSingleObject(handle, 30_000) };
+    unsafe {
+        CloseHandle(handle);
+    }
+    if result != WAIT_OBJECT_0 {
+        return Err("旧进程尚未退出，迁移数据已保留，请稍后重新打开 GitHubSP".into());
+    }
+    Ok(())
+}
+
+pub fn restart() -> Result<(), String> {
+    restart_executable(&std::env::current_exe().map_err(|e| e.to_string())?)
+}
+
+fn restart_executable(executable: &std::path::Path) -> Result<(), String> {
+    use std::os::windows::process::CommandExt;
+    std::process::Command::new(executable)
+        .args(["--restart-after", &std::process::id().to_string()])
+        .creation_flags(0x08000000)
+        .spawn()
+        .map_err(|e| format!("自动重启失败，请重新打开程序：{e}"))?;
+    Ok(())
+}
+
+/// 仅依赖命名对象存续期，不跨线程转移 Windows 互斥锁的线程所有权。
+pub struct DirectoryLock(HANDLE);
+unsafe impl Send for DirectoryLock {}
+
+impl DirectoryLock {
+    pub fn acquire(directory: &std::path::Path) -> Result<Self, String> {
+        Self::acquire_id(&instance_id(directory)?)
+    }
+
+    fn acquire_id(id: &str) -> Result<Self, String> {
+        let name = wide(&format!("{id}-sim"));
+        let handle = unsafe { CreateMutexW(std::ptr::null(), 0, name.as_ptr()) };
+        if handle.is_null() {
+            return Err(std::io::Error::last_os_error().to_string());
+        }
+        if unsafe { GetLastError() } == ERROR_ALREADY_EXISTS {
+            unsafe {
+                CloseHandle(handle);
+            }
+            return Err("该数据目录正在被另一个 GitHubSP 实例使用，请退出该实例后重试".into());
+        }
+        Ok(Self(handle))
+    }
+}
+
+impl Drop for DirectoryLock {
+    fn drop(&mut self) {
+        unsafe {
+            CloseHandle(self.0);
+        }
     }
 }
 
@@ -211,6 +334,50 @@ impl Drop for Instance {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn startup_resolution_prefers_explicit_then_saved_then_default_without_fallback_on_bad_config()
+    {
+        let root = tempfile::tempdir().unwrap();
+        let locations = githubsp_lib::relocation::Locations {
+            default_directory: root.path().join("默认"),
+            config_file: root.path().join("位置.json"),
+        };
+        let configured = || Ok(locations.clone());
+        assert_eq!(
+            resolve_directory(None, configured).unwrap().directory,
+            locations.default_directory
+        );
+        let mut state = locations.load().unwrap();
+        state.active = Some(root.path().join("自定义"));
+        locations.save(&state).unwrap();
+        assert_eq!(
+            resolve_directory(None, configured).unwrap().directory,
+            state.active.unwrap()
+        );
+        std::fs::write(&locations.config_file, b"broken").unwrap();
+        assert!(resolve_directory(None, configured).is_err());
+        let explicit = root.path().join("隔离");
+        let result = resolve_directory(Some(explicit.clone()), || {
+            panic!("显式参数不得读取正式配置")
+        })
+        .unwrap();
+        assert_eq!(result.directory, explicit);
+        assert!(result.locations.is_none());
+        assert!(!explicit.exists());
+    }
+
+    #[test]
+    fn migration_reservation_blocks_other_instances_and_missing_restart_program_is_reported() {
+        let root = tempfile::tempdir().unwrap();
+        let guard = DirectoryLock::acquire(root.path()).unwrap();
+        assert!(DirectoryLock::acquire(root.path()).is_err());
+        assert!(Instance::acquire(&instance_id(root.path()).unwrap(), || {}).is_err());
+        drop(guard);
+        let _again = DirectoryLock::acquire(root.path()).unwrap();
+        assert!(restart_executable(&root.path().join("missing.exe")).is_err());
+        assert!(wait_for_exit(std::process::id()).is_err());
+    }
 
     #[test]
     fn isolated_directory_requires_an_absolute_path_and_no_extra_arguments() {

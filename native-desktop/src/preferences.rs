@@ -34,6 +34,20 @@ fn apply(window: &MainWindow, settings: &Settings) {
     ui.set_auto_check(settings.auto_check);
 }
 
+pub fn has_unsaved(window: &MainWindow, service: &Service) -> bool {
+    let ui = window.global::<Preferences>();
+    let state = service.state.borrow();
+    let Some(snapshot) = state.as_ref() else {
+        return true;
+    };
+    let saved = &snapshot.settings;
+    ui.get_busy()
+        || parse_limit(&ui.get_limit(), saved.limit_kib).ok() != Some(saved.limit_kib)
+        || ui.get_close_to_tray() != saved.close_to_tray
+        || ui.get_completion() != saved.background_completion_notice
+        || ui.get_auto_check() != saved.auto_check
+}
+
 pub fn bind(window: &MainWindow, api: &Arc<Service>, runtime: &tokio::runtime::Handle) {
     if let Some(snapshot) = api.state.borrow().clone() {
         apply(window, &snapshot.settings);

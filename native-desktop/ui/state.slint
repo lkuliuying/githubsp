@@ -158,8 +158,17 @@ export global Storage {
     in property <string> directory;
     in property <string> message;
     in property <bool> busy;
+    in property <bool> allowed;
+    in-out property <string> target;
+    in-out property <bool> dialog;
+    in property <bool> migrating;
     callback open-directory();
     callback export-backup();
+    callback choose-target();
+    callback edit-target();
+    callback request-migration();
+    callback confirm-migration(bool);
+    callback cancel-migration();
 }
 
 export global Updates {

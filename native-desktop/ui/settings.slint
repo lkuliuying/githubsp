@@ -161,6 +161,13 @@ component DataSettings inherits VerticalLayout {
         title: "数据目录"; description: "保存历史、收藏与设置等应用记录。"; icon: @image-url("../resources/icons/FolderOpen-regular.svg");
         Message { text: Storage.directory; }
         HorizontalLayout { alignment: start; ActionButton { text: "打开数据目录"; icon: @image-url("../resources/icons/FolderOpen-regular.svg"); enabled: !Updates.dialog && !Storage.busy; clicked => { Storage.open-directory(); } } }
+        Input { text <=> Storage.target; placeholder: "目标数据目录（绝对路径）"; enabled: Storage.allowed && !Storage.busy && !Storage.dialog && !Updates.dialog; edited(value) => { Storage.edit-target(); } }
+        HorizontalLayout {
+            spacing: 8px; alignment: start;
+            ActionButton { text: "浏览"; compact: true; enabled: Storage.allowed && !Storage.busy && !Storage.dialog && !Updates.dialog; clicked => { Storage.choose-target(); } }
+            ActionButton { text: "迁移并重启"; compact: true; primary: true; enabled: Storage.allowed && !Storage.busy && !Storage.dialog && !Updates.dialog; clicked => { Storage.request-migration(); } }
+        }
+        Muted { text: Storage.allowed ? "选择空目录。迁移前可选择保留原目录备份；下载文件与续传分片不移动。" : "隔离运行或迁移收尾期间不能修改数据目录。"; wrap: word-wrap; }
     }
     SettingCard {
         title: "备份与导出"; description: "将应用记录导出为 SQLite 备份。"; icon: @image-url("../resources/icons/Package-regular.svg");
@@ -168,8 +175,48 @@ component DataSettings inherits VerticalLayout {
         HorizontalLayout { alignment: start; ActionButton { text: Storage.busy ? "正在处理…" : "导出备份"; icon: @image-url("../resources/icons/ArrowLineUp-regular.svg"); primary: true; enabled: !Updates.dialog && !Storage.busy; clicked => { Storage.export-backup(); } } }
     }
     SettingCard {
-        title: "本次导出反馈"; icon: @image-url("../resources/icons/ClockCounterClockwise-regular.svg");
-        Message { text: Storage.message == "" ? "本次运行尚无导出结果。完成后将在这里显示实际结果与保存位置。" : Storage.message; }
+        title: "数据管理反馈"; icon: @image-url("../resources/icons/ClockCounterClockwise-regular.svg");
+        Message { text: Storage.message == "" ? "完成导出或迁移后，将在这里显示实际结果与保存位置。" : Storage.message; }
+    }
+}
+
+export component MigrationDialog inherits FocusScope {
+    init => { cancel-button.focus(); }
+    key-pressed(event) => {
+        if Storage.migrating { return accept; }
+        if event.text == Key.Escape { Storage.cancel-migration(); return accept; }
+        if event.text == Key.Tab {
+            if event.modifiers.shift {
+                if cancel-button.has-focus { move-button.focus(); }
+                else if move-button.has-focus { backup-button.focus(); }
+                else { cancel-button.focus(); }
+            } else {
+                if cancel-button.has-focus { backup-button.focus(); }
+                else if backup-button.has-focus { move-button.focus(); }
+                else { cancel-button.focus(); }
+            }
+            return accept;
+        }
+        return reject;
+    }
+    Rectangle { background: #263f635c; }
+    TouchArea {}
+    Rectangle {
+        x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2;
+        width: min(560px, parent.width - 32px); height: min(520px, parent.height - 32px);
+        background: white; border-radius: 14px;
+        content := VerticalLayout {
+            padding: 16px; spacing: 8px;
+            Heading { title: Storage.migrating ? "正在迁移数据" : "更改数据目录"; icon: @image-url("../resources/icons/FolderOpen-regular.svg"); }
+            ScrollView {
+                content-width: self.visible-width; min-height: 90px; vertical-stretch: 1;
+                Message { text: Storage.migrating ? Storage.message : "当前目录：\n" + Storage.directory + "\n\n目标目录：\n" + Storage.target; }
+            }
+            Muted { text: Storage.migrating ? "请等待迁移和重启完成。" : "是否保留原目录作为备份？迁移会保存并暂停下载，然后自动重启。下载文件与续传分片不移动。"; wrap: word-wrap; }
+            backup-button := ActionButton { text: "保留备份并迁移"; primary: true; enabled: !Storage.migrating; clicked => { Storage.confirm-migration(true); } }
+            move-button := ActionButton { text: "不备份并迁移"; enabled: !Storage.migrating; clicked => { Storage.confirm-migration(false); } }
+            cancel-button := ActionButton { text: "取消"; enabled: !Storage.migrating; clicked => { Storage.cancel-migration(); } }
+        }
     }
 }
 

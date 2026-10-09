@@ -11,6 +11,8 @@ use githubsp_lib::{
 };
 use i_slint_backend_testing::{ElementHandle, TestingBackend, TestingBackendOptions};
 use slint::{ComponentHandle, Model};
+#[path = "storage/ui_tests.rs"]
+mod storage_ui_tests;
 use std::{
     io::{Read, Write},
     net::TcpListener,
@@ -50,6 +52,8 @@ impl CatalogFixture {
                     }
                     Err(error) => panic!("本地目录服务无法接收请求：{error}"),
                 };
+                // Windows 接收的连接可能沿用监听器的非阻塞模式，读取请求仍需等待原有超时。
+                stream.set_nonblocking(false).unwrap();
                 stream
                     .set_read_timeout(Some(Duration::from_secs(2)))
                     .unwrap();
@@ -1570,6 +1574,7 @@ fn module_pages_bind_to_core_and_remain_usable_at_supported_sizes() {
         verify_secondary_windows();
         crate::completion::tests::verify_lifecycle(&window).await;
         verify_dialog_keyboard(&window);
+        storage_ui_tests::verify(&test_runtime).await;
         done.set(true); slint::quit_event_loop().unwrap();
     }).unwrap();
     slint::run_event_loop_until_quit().unwrap();

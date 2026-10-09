@@ -6,10 +6,13 @@ use crate::{
 use slint::ComponentHandle;
 use std::sync::Arc;
 
+mod migration;
+
 pub fn bind(window: &MainWindow, service: &Arc<Service>, runtime: &tokio::runtime::Handle) {
     window
         .global::<Storage>()
         .set_directory(service.data_directory.to_string_lossy().as_ref().into());
+    migration::bind(window, service, runtime);
     let (weak, api, runtime1) = (window.as_weak(), service.clone(), runtime.clone());
     window.global::<Storage>().on_open_directory(move || {
         let Some(window) = weak.upgrade() else {

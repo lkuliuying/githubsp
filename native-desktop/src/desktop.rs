@@ -46,6 +46,9 @@ pub fn install(
             let _ = weak.upgrade_in_event_loop(|window| window.invoke_exit());
         }
         "pause" => {
+            if api.is_closing() {
+                return;
+            }
             let (api, weak) = (api.clone(), weak.clone());
             runtime.spawn(async move {
                 let result = async {
@@ -97,6 +100,9 @@ pub fn install(
     });
     let (weak, api) = (window.as_weak(), service.clone());
     window.window().on_close_requested(move || {
+        if api.is_closing() {
+            return slint::CloseRequestResponse::KeepWindowShown;
+        }
         if let Some(window) = weak.upgrade() {
             if api
                 .state
