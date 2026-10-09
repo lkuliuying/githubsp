@@ -47,7 +47,8 @@ Copy-Item -LiteralPath $packageBinary -Destination $packageFile -Force
 $packageHash = (Get-FileHash -LiteralPath $packageFile -Algorithm SHA256).Hash
 [ordered]@{
     File=$packageFileName;Sha256=$packageHash;Bytes=(Get-Item -LiteralPath $packageFile).Length
-    Stage='Slint 独立桌面构建；未发布';DefaultDataDirectory='%LOCALAPPDATA%\com.githubsp.desktop';DatabaseVersion=3
+    Stage='Slint 独立桌面构建；未发布';DefaultDataDirectory='%LOCALAPPDATA%\com.githubsp.desktop';DatabaseVersion=2
+    StorageRevision=1;CompatibleLegacyVersions=@('0.2.0','0.2.1','0.2.2','0.2.3');ExcludedUnpatchedVersions=@('0.2.4')
     Renderer='Slint 1.18.1 / Winit / FemtoVG-WGPU / DX12';StaticCrtRequested=$true
     ReleaseRepository=$ReleaseRepository
     DirectImports=$packageLibraries

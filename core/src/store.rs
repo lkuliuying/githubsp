@@ -7,6 +7,9 @@ use rusqlite::{params, Connection, OpenFlags, OptionalExtension};
 use std::path::Path;
 
 mod backup;
+mod compatibility;
+#[cfg(test)]
+mod compatibility_tests;
 mod migration;
 #[cfg(test)]
 mod tests;
@@ -46,11 +49,15 @@ fn decode(row: &rusqlite::Row<'_>) -> Result<StoredTask> {
     let id: String = row.get(0)?;
     let created: i64 = row.get(1)?;
     let json: String = row.get(2)?;
-    let record: StoredTask = serde_json::from_str(&json)?;
+    let mut record: StoredTask = serde_json::from_str(&json)?;
     validate(&id, created, &record)?;
     let status: String = row.get(3)?;
     let search: String = row.get(4)?;
     let position: i64 = row.get(5)?;
+    // 共享 JSON 使用旧版可识别的暂停状态，当前进程的等待状态保留在投影中。
+    if status == TaskStatus::WaitingNetwork.as_str() && record.task.status == TaskStatus::Paused {
+        record.task.status = TaskStatus::WaitingNetwork;
+    }
     if status != record.task.status.as_str()
         || search != history::search_text(&record.task)
         || position != integer(record.task.details.queue_position)?
@@ -77,11 +84,15 @@ fn write_record(connection: &Connection, record: &StoredTask, insert: bool) -> R
         params![
             record.task.id,
             created,
-            serde_json::to_string(record)?,
+            compatibility::encode(record)?,
             record.task.status.as_str(),
             history::search_text(&record.task),
             integer(record.task.details.queue_position)?
         ],
+    )?;
+    connection.execute(
+        "DELETE FROM githubsp_dirty_tasks WHERE id=?1",
+        [&record.task.id],
     )?;
     Ok(())
 }
@@ -104,10 +115,8 @@ impl Store {
         let connection = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
         connection.busy_timeout(std::time::Duration::from_secs(5))?;
         connection.execute_batch("PRAGMA query_only=ON;")?;
-        let version: u32 = connection.pragma_query_value(None, "user_version", |row| row.get(0))?;
-        if version != migration::VERSION {
-            return Err(DownloadError::new(ErrorKind::Storage, "数据库版本尚未就绪"));
-        }
+        migration::check_ready(&connection)?;
+        compatibility::require_clean(&connection)?;
         Ok(Self { connection })
     }
 
@@ -218,7 +227,10 @@ impl Store {
     }
 
     pub fn save(&self, record: &StoredTask) -> Result<()> {
-        write_record(&self.connection, record, false)
+        let transaction = self.connection.unchecked_transaction()?;
+        write_record(&transaction, record, false)?;
+        transaction.commit()?;
+        Ok(())
     }
 
     pub fn insert(&mut self, record: &StoredTask) -> Result<()> {

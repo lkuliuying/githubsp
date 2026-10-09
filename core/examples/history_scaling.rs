@@ -56,6 +56,8 @@ fn seed(path: &Path, count: u64) -> Result<(), Box<dyn std::error::Error>> {
     }
     transaction.commit()?;
     connection.close().map_err(|(_, error)| error)?;
+    // 样本通过原始 SQL 批量写入，先完成变更投影修复，再单独测量正常启动。
+    Store::open(path)?.close()?;
     Ok(())
 }
 

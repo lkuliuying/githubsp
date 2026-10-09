@@ -6,7 +6,7 @@ use crate::{
 };
 use std::{path::PathBuf, sync::Arc};
 
-fn record(root: &Path, index: u64, status: TaskStatus) -> StoredTask {
+pub(super) fn record(root: &Path, index: u64, status: TaskStatus) -> StoredTask {
     StoredTask {
         task: Task {
             id: format!("00000000-0000-4000-8000-{index:012}"),
@@ -35,7 +35,7 @@ fn record(root: &Path, index: u64, status: TaskStatus) -> StoredTask {
     }
 }
 
-fn legacy(path: &Path, version: u32, records: &[StoredTask]) -> Connection {
+pub(super) fn legacy(path: &Path, version: u32, records: &[StoredTask]) -> Connection {
     let connection = Connection::open(path).unwrap();
     connection
         .execute_batch(
@@ -69,7 +69,7 @@ fn legacy(path: &Path, version: u32, records: &[StoredTask]) -> Connection {
     connection
 }
 
-fn backup_files(root: &Path) -> Vec<PathBuf> {
+pub(super) fn backup_files(root: &Path) -> Vec<PathBuf> {
     std::fs::read_dir(root.join("backups"))
         .unwrap()
         .map(|entry| entry.unwrap().path())
@@ -87,7 +87,7 @@ fn fresh_schema_and_repeat_start_keep_full_durability() {
                 .connection
                 .pragma_query_value(None, "user_version", |r| r.get::<_, u32>(0))
                 .unwrap(),
-            3
+            2
         );
         assert_eq!(
             store
@@ -396,10 +396,20 @@ fn history_only_decodes_current_page_and_clamps_after_last_page_removal() {
             .unwrap();
     }
     let oldest = record(root.path(), 0, TaskStatus::Completed).task.id;
+    // 模拟落盘内容损坏，绕过写入校验；仍需验证未访问的历史不会被全表解析。
+    store
+        .connection
+        .execute_batch("DROP TRIGGER githubsp_tasks_update")
+        .unwrap();
     store
         .connection
         .execute("UPDATE tasks SET payload='broken' WHERE id=?1", [&oldest])
         .unwrap();
+    let (_, trigger) = compatibility::triggers()
+        .into_iter()
+        .find(|(name, _)| *name == "githubsp_tasks_update")
+        .unwrap();
+    store.connection.execute_batch(&trigger).unwrap();
     assert_eq!(store.query_history("", None, 1, 0).unwrap().items.len(), 20);
     assert!(store.query_history("", None, 3, 0).is_err());
     store.remove(&oldest).unwrap();

@@ -92,7 +92,7 @@ fn migration_backup_and_rollback() {
             p.file_name()
                 .unwrap()
                 .to_string_lossy()
-                .starts_with("tasks-v1-before-v3-")
+                .starts_with("tasks-v1-before-compat-1-")
         })
         .unwrap();
     let backup_db = rusqlite::Connection::open(backup).unwrap();
