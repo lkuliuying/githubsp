@@ -10,7 +10,7 @@ export struct TaskRow {
 export struct RouteRow { id: string, name: string, speed: string, state: string, detail: string, tone: int }
 export struct ReleaseRow { id: string, tag: string, detail: string }
 export struct AssetRow { url: string, name: string, size: string, detail: string, unavailable: bool, selected: bool }
-export struct PreviewRow { name: string, state: string, detail: string, task-id: string, tone: int }
+export struct PreviewRow { name: string, size: string, state: string, detail: string, task-id: string, tone: int }
 export struct HistoryRow { id: string, number: string, name: string, state: string, repository: string, tag: string, date: string, completed: string, path: string, file-state: string, tone: int, removable: bool }
 export struct FavoriteRow { repository: string, tag: string, state: string, tone: int, color-index: int, checked: string, error: string }
 export struct NoteTableRow { cells: [string], header: bool }
@@ -78,8 +78,14 @@ export global Sources {
     in property <int> selected-count;
     in property <string> selected-size: "0 B";
     in property <bool> preview-visible;
-    in property <string> preview-summary;
-    in property <string> preview-space;
+    in property <int> preview-valid-count;
+    in property <int> preview-duplicate-count;
+    in property <int> preview-invalid-count;
+    in property <string> preview-directory;
+    in property <string> preview-known-size;
+    in property <int> preview-unknown-count;
+    in property <string> preview-available-space;
+    in property <string> preview-space-note;
     in property <[PreviewRow]> preview;
     in property <bool> can-submit;
     in-out property <int> route;

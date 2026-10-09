@@ -96,6 +96,8 @@ impl CatalogFixture {
                         .collect();
                     let (status, body) = if path.contains("page=2") {
                         ("503 Service Unavailable", "{}".to_owned())
+                    } else if path.contains("/tags/") {
+                        ("200 OK", serde_json::to_string(&releases[0]).unwrap())
                     } else {
                         ("200 OK", serde_json::to_string(&releases).unwrap())
                     };
@@ -131,12 +133,16 @@ impl Drop for CatalogFixture {
 
 fn seed(path: &Path) {
     let store = Store::open(&path.join("tasks.sqlite3")).unwrap();
+    // 与实际创建任务一致，避免临时路径的前缀或短名影响重复任务识别。
+    let directory = githubsp_lib::preflight::inspect_directory(path)
+        .unwrap()
+        .directory;
     for index in 0..64 {
         let task = Task {
             id: format!("00000000-0000-4000-8000-{index:012}"),
             url: format!("https://github.com/test/project/releases/download/v1/中文附件-{index}-windows-x64.zip"),
             filename: format!("中文附件-{index}-windows-x64.zip"),
-            directory: path.to_owned(),
+            directory: directory.clone(),
             status: if index == 0 {
                 TaskStatus::Paused
             } else {
@@ -208,7 +214,7 @@ fn capture(window: &impl ComponentHandle, name: &str, width: u32, height: u32) {
     let output = std::env::var_os("GITHUBSP_UI_RENDER_DIRECTORY")
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|| {
-            Path::new(env!("CARGO_MANIFEST_DIR")).join("../artifacts/style-abc-review/ui-renders")
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../artifacts/verification/ui-renders")
         });
     std::fs::create_dir_all(&output).unwrap();
     image::save_buffer(
@@ -384,7 +390,7 @@ async fn verify_module_flows(window: &MainWindow, api: &Arc<Service>, fixture: &
     assert!(sources.get_preview_visible());
     for (width, height) in [(1448, 1086), (1040, 740), (720, 520)] {
         capture(window, "batch-preview", width, height);
-        for label in ["返回修改", "确认创建有效任务"] {
+        for label in ["返回修改", "创建 1 个有效任务"] {
             assert_button_in_window(window, label, width, height);
         }
     }
@@ -567,6 +573,23 @@ async fn verify_module_flows(window: &MainWindow, api: &Arc<Service>, fixture: &
     );
 }
 
+fn scroll_confirmation_page(window: &MainWindow, viewport: &ElementHandle, delta_y: f32) {
+    let position = viewport.absolute_position();
+    let size = viewport.size();
+    // 在右侧留白滚动外层正文，避免滚轮落入独立的附件列表。
+    window
+        .window()
+        .dispatch_event(slint::platform::WindowEvent::PointerScrolled {
+            position: slint::LogicalPosition::new(
+                position.x + size.width - 18.0,
+                position.y + size.height / 2.0,
+            ),
+            delta_x: 0.0,
+            delta_y,
+        });
+    window.window().take_snapshot().unwrap();
+}
+
 fn assert_regions_separate(window: &MainWindow, first: &str, second: &str) {
     let area = if window.global::<Workspace>().get_page() == 3 {
         "SettingsPage::settings-scroll"
@@ -576,13 +599,20 @@ fn assert_regions_separate(window: &MainWindow, first: &str, second: &str) {
     let viewport = ElementHandle::find_by_element_id(window, area)
         .next()
         .unwrap();
+    let scroll = |delta| {
+        if window.global::<Sources>().get_preview_visible() {
+            scroll_confirmation_page(window, &viewport, delta);
+        } else {
+            viewport.scroll(0.0, delta);
+        }
+    };
     // 测试后端只枚举可见元素，窄窗口需先滚动获取两块区域的句柄。
     let find = |id: &str| {
         for _ in 0..30 {
             if let Some(element) = ElementHandle::find_by_element_id(window, id).next() {
                 return element;
             }
-            viewport.scroll(0.0, -(viewport.size().height / 2.0).max(20.0));
+            scroll(-(viewport.size().height / 2.0).max(20.0));
             window.window().take_snapshot().unwrap();
         }
         panic!("滚动后应能找到区域 {id}");
@@ -599,8 +629,217 @@ fn assert_regions_separate(window: &MainWindow, first: &str, second: &str) {
         a_pos.x + a_size.width <= b_pos.x + 1.0 || a_pos.y + a_size.height <= b_pos.y + 1.0,
         "区域 {first} 和 {second} 不得重叠：{a_pos:?} {a_size:?} / {b_pos:?} {b_size:?}"
     );
-    viewport.scroll(0.0, 100_000.0);
+    scroll(100_000.0);
     window.window().take_snapshot().unwrap();
+}
+
+async fn verify_direct_and_confirmation_layouts(window: &MainWindow, api: &Arc<Service>) {
+    let workspace = window.global::<Workspace>();
+    let sources = window.global::<Sources>();
+    let previous_page = workspace.get_page();
+    let previous_url = workspace.get_url();
+    let previous_directory = workspace.get_directory();
+    let previous_batch = sources.get_batch_input();
+    let previous_route = sources.get_route();
+    workspace.invoke_navigate(0);
+    workspace.invoke_select_download_section(1);
+    workspace.invoke_select_creation_mode(0);
+    let url = "https://github.com/sample/project/releases/download/v1.0.0/project-windows-x64.zip";
+    workspace.set_url(url.into());
+    workspace.set_directory("D:\\Downloads\\GitHubSP".into());
+    for (width, height) in [(1448, 1086), (1040, 740), (720, 520)] {
+        capture(window, "compact-direct", width, height);
+        assert_regions_separate(
+            window,
+            "DirectDownloadContent::form",
+            "DirectDownloadContent::guide",
+        );
+        assert_button_in_window(window, "添加下载任务", width, height);
+        scroll_to_button(window, "浏览", height);
+        assert_button_in_window(window, "浏览", width, height);
+    }
+    workspace.set_url("".into());
+    assert_eq!(
+        ElementHandle::find_by_accessible_label(window, "添加下载任务")
+            .next()
+            .unwrap()
+            .accessible_enabled(),
+        Some(false),
+        "空链接不可创建任务"
+    );
+    workspace.set_url(url.into());
+    workspace.invoke_select_creation_mode(2);
+    workspace.set_directory(api.data_directory.to_string_lossy().as_ref().into());
+    let existing = api
+        .manager
+        .snapshot()
+        .await
+        .unwrap()
+        .tasks
+        .into_iter()
+        .find(|task| task.status == TaskStatus::Paused)
+        .unwrap();
+    let expected_directory = githubsp_lib::preflight::inspect_directory(&api.data_directory)
+        .unwrap()
+        .directory;
+    assert_eq!(existing.directory, expected_directory);
+    let batch = format!("{url}\nhttps://github.com/sample/project/releases/download/v1.0.0/project-linux-x64.tar.gz\nhttps://github.com/sample/project/releases/download/v1.0.0/checksums.txt\n{}\nhttps://example.com/archive.zip", existing.url);
+    sources.set_batch_input(batch.clone().into());
+    sources.invoke_edited();
+    sources.invoke_preview_batch(false);
+    ready(|| !sources.get_busy()).await;
+    assert!(sources.get_preview_visible());
+    assert!(sources.get_can_submit());
+    assert_eq!(
+        (
+            sources.get_preview_valid_count(),
+            sources.get_preview_duplicate_count(),
+            sources.get_preview_invalid_count()
+        ),
+        (3, 1, 1)
+    );
+    assert_eq!(sources.get_preview_known_size(), "168 MB");
+    assert_eq!(sources.get_preview_unknown_count(), 0);
+    assert_eq!(
+        Path::new(sources.get_preview_directory().as_str()),
+        expected_directory
+    );
+    assert!(!sources.get_preview_available_space().is_empty());
+    let rows: Vec<_> = sources.get_preview().iter().collect();
+    assert_eq!(rows[0].size, "86.3 MB");
+    assert_eq!(rows[2].size, "1.2 KB");
+    assert_eq!(rows[3].task_id, existing.id);
+    assert_eq!(rows[3].tone, 3);
+    assert_eq!(rows[4].tone, 2);
+    assert!(!rows[4].detail.is_empty());
+
+    // 固定图例便于与所选设计图比较，前面的断言已验证真实预览数据映射。
+    sources.set_preview_directory("D:\\Downloads\\GitHubSP".into());
+    sources.set_preview_available_space("42.2 GB".into());
+    let mut illustrated = rows.clone();
+    illustrated[3].name = "project-windows-arm64.zip".into();
+    illustrated[3].detail = "存在未完成任务".into();
+    illustrated[4].detail = "不支持的链接，请返回修改".into();
+    sources.set_preview(presentation::model(illustrated));
+    for (width, height) in [(1448, 1086), (1040, 740), (720, 520)] {
+        capture(window, "compact-confirmation", width, height);
+        assert_regions_separate(
+            window,
+            "BatchConfirmation::files",
+            "BatchConfirmation::settings",
+        );
+        for label in ["返回修改", "创建 3 个有效任务"] {
+            assert_button_in_window(window, label, width, height);
+        }
+        let viewport = ElementHandle::find_by_element_id(window, "NewDownloadPanel::new-scroll")
+            .next()
+            .unwrap();
+        scroll_confirmation_page(window, &viewport, -100_000.0);
+        capture(window, "compact-confirmation-settings", width, height);
+        let picker = ElementHandle::find_by_element_id(window, "PreviewSettings::route-picker")
+            .next()
+            .expect("滚动后下载线路必须可达");
+        assert!(picker.absolute_position().y + picker.size().height <= height as f32 - 65.0);
+        assert_button_in_window(window, "创建 3 个有效任务", width, height);
+        scroll_confirmation_page(window, &viewport, 100_000.0);
+    }
+    sources.set_busy(true);
+    assert_eq!(
+        ElementHandle::find_by_accessible_label(window, "创建 3 个有效任务")
+            .next()
+            .unwrap()
+            .accessible_enabled(),
+        Some(false)
+    );
+    sources.set_busy(false);
+    sources.set_route(2);
+    ElementHandle::find_by_accessible_label(window, "返回修改")
+        .next()
+        .unwrap()
+        .invoke_accessible_default_action();
+    assert!(!sources.get_preview_visible());
+    assert_eq!(sources.get_batch_input(), batch);
+    assert_eq!(sources.get_route(), 2);
+    assert_eq!(workspace.get_url(), url);
+
+    sources.set_batch_input(
+        "https://github.com/test/project/releases/download/v1.0.0/unknown-size.zip".into(),
+    );
+    sources.invoke_edited();
+    sources.invoke_preview_batch(false);
+    ready(|| !sources.get_busy()).await;
+    assert!(sources.get_can_submit());
+    assert_eq!(sources.get_preview_unknown_count(), 1);
+    assert_eq!(sources.get_preview_known_size(), "0 B");
+    assert_eq!(sources.get_preview().row_data(0).unwrap().size, "未知");
+    capture(window, "compact-confirmation-unknown", 1040, 740);
+
+    // 百项列表与超长文本只测试呈现边界，不创建下载或发起外网请求。
+    let many: Vec<_> = (0..100)
+        .map(|index| {
+            let mut row = rows[0].clone();
+            row.name = format!("批量附件-{index:03}-windows-x64.zip").into();
+            row
+        })
+        .collect();
+    sources.set_preview(presentation::model(many));
+    sources.set_preview_valid_count(100);
+    sources.set_preview_duplicate_count(0);
+    sources.set_preview_invalid_count(0);
+    sources.set_preview_unknown_count(0);
+    sources.set_preview_known_size("8.6 GB".into());
+    capture(window, "compact-confirmation-many", 720, 520);
+    let list = ElementHandle::find_by_element_id(window, "BatchConfirmation::preview-list")
+        .next()
+        .unwrap();
+    for _ in 0..3 {
+        list.scroll(0.0, -100_000.0);
+        window.window().take_snapshot().unwrap();
+    }
+    let last = ElementHandle::find_by_accessible_label(window, "批量附件-099-windows-x64.zip")
+        .next()
+        .expect("列表末项应可滚动到");
+    assert!(last.absolute_position().y >= list.absolute_position().y);
+    assert!(
+        last.absolute_position().y + last.size().height
+            <= list.absolute_position().y + list.size().height
+    );
+    capture(window, "compact-confirmation-many-bottom", 720, 520);
+    assert_button_in_window(window, "创建 100 个有效任务", 720, 520);
+    sources.invoke_dismiss_preview();
+    sources.set_batch_input("https://example.com/archive.zip".into());
+    sources.invoke_edited();
+    sources.invoke_preview_batch(false);
+    ready(|| !sources.get_busy()).await;
+    assert_eq!(sources.get_preview_valid_count(), 0);
+    assert_eq!(sources.get_preview_invalid_count(), 1);
+    assert!(!sources.get_can_submit());
+    let mut invalid = sources.get_preview().row_data(0).unwrap();
+    invalid.name = "不支持的超长中文链接内容".repeat(8).into();
+    invalid.detail = "链接格式无效，请返回输入页面修改；当前输入不属于受支持的 GitHub 附件直链。"
+        .repeat(5)
+        .into();
+    sources.set_preview(presentation::model(vec![invalid]));
+    sources.set_preview_directory(
+        "D:\\中文下载目录\\很长的项目文件夹名称\\多个版本与附件\\最终保存位置".into(),
+    );
+    for (width, height) in [(1040, 740), (720, 520)] {
+        capture(window, "compact-confirmation-invalid", width, height);
+        assert_button_in_window(window, "返回修改", width, height);
+        assert_eq!(
+            ElementHandle::find_by_accessible_label(window, "创建 0 个有效任务")
+                .next()
+                .unwrap()
+                .accessible_enabled(),
+            Some(false)
+        );
+    }
+    sources.invoke_dismiss_preview();
+    sources.set_batch_input(previous_batch);
+    sources.set_route(previous_route);
+    workspace.set_directory(previous_directory);
+    workspace.set_url(previous_url);
+    workspace.invoke_navigate(previous_page);
 }
 
 async fn verify_selected_download_layouts(window: &MainWindow, api: &Arc<Service>) {
@@ -1007,6 +1246,7 @@ fn module_pages_bind_to_core_and_remain_usable_at_supported_sizes() {
         }
         verify_module_flows(&window,&api1,&fixture).await;
         verify_selected_download_layouts(&window,&api1).await;
+        verify_direct_and_confirmation_layouts(&window,&api1).await;
         let settings = window.global::<Preferences>();
         settings.set_limit("0.262144".into()); settings.set_close_to_tray(true); settings.invoke_save();
         ready(||!settings.get_busy()).await;
@@ -1096,7 +1336,7 @@ fn module_pages_bind_to_core_and_remain_usable_at_supported_sizes() {
     assert!(finished.get());
     runtime.block_on(api.shutdown()).unwrap();
     let native_fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join(format!(
-        "../artifacts/style-abc-review/native-fixture-{}",
+        "../artifacts/verification/native-fixture-{}",
         githubsp_lib::model::now_ms()
     ));
     std::fs::create_dir_all(&native_fixture).unwrap();

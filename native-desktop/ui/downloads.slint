@@ -99,6 +99,146 @@ component SourceBrowser inherits VerticalLayout {
     }
 }
 
+component DirectoryPicker inherits HorizontalLayout {
+    height: 42px; spacing: 8px;
+    Input { text <=> Workspace.directory; placeholder: "输入或选择保存目录"; enabled: !Updates.dialog && (!Workspace.busy && !Sources.busy); edited => { Workspace.input-edited(true); } }
+    ActionButton { text: "浏览"; icon: @image-url("../resources/icons/FolderOpen-regular.svg"); enabled: !Updates.dialog && (!Workspace.busy && !Sources.busy); clicked => { Workspace.pick-directory(); } }
+}
+
+component DirectDownloadContent inherits Rectangle {
+    private property <bool> stacked: root.width < 660px;
+    height: root.stacked ? form.height + 16px + guide.height : max(form.height, guide.height);
+    form := Rectangle {
+        x: 0px; y: 0px;
+        width: root.stacked ? parent.width : (parent.width - 20px) * 0.66;
+        height: fields.preferred-height;
+        fields := VerticalLayout {
+            spacing: 12px; alignment: start;
+            Label { text: "GitHub 链接"; font-weight: 600; }
+            Input { height: 42px; text <=> Workspace.url; placeholder: "粘贴 Release 附件直链或仓库地址"; enabled: !Updates.dialog && (!Workspace.busy); edited => { Workspace.input-edited(false); } accepted => { Workspace.create(); } }
+            Muted { text: "附件直链直接添加；仓库或版本地址进入附件选择。"; wrap: word-wrap; font-size: 11px; }
+            Rectangle { height: 6px; }
+            Label { text: "保存目录"; font-weight: 600; }
+            DirectoryPicker {}
+        }
+    }
+    guide := Rectangle {
+        x: root.stacked ? 0px : form.width + 20px;
+        y: root.stacked ? form.height + 16px : 0px;
+        width: parent.width - self.x;
+        height: guide-content.preferred-height;
+        background: Theme.blue-soft; border-radius: 8px;
+        guide-content := VerticalLayout {
+            padding: 16px; spacing: 18px; alignment: start;
+            Label { text: "下载说明"; font-size: 15px; font-weight: 650; }
+            HorizontalLayout {
+                spacing: 10px;
+                Icon { source: @image-url("../resources/icons/Broadcast-regular.svg"); tint: #197de5; width: 24px; }
+                VerticalLayout {
+                    spacing: 6px;
+                    Label { text: "自动检测可用线路"; font-weight: 600; }
+                    Muted { text: "开始下载时自动检测可用线路，提高下载成功率。"; wrap: word-wrap; font-size: 11px; }
+                }
+            }
+            HorizontalLayout {
+                spacing: 10px;
+                Icon { source: @image-url("../resources/icons/ListBullets-regular.svg"); tint: #197de5; width: 24px; }
+                VerticalLayout {
+                    spacing: 6px;
+                    Label { text: "任务按队列顺序下载"; font-weight: 600; }
+                    Muted { text: "加入下载队列后，将按顺序依次下载。"; wrap: word-wrap; font-size: 11px; }
+                }
+            }
+        }
+    }
+}
+
+component PreviewCounts inherits HorizontalLayout {
+    spacing: 8px; alignment: start;
+    Icon { source: @image-url("../resources/icons/CheckCircle-fill.svg"); tint: Theme.green; }
+    Label { text: "有效 " + Sources.preview-valid-count + " 项"; horizontal-stretch: 0; }
+    Rectangle { width: 8px; }
+    Icon { source: @image-url("../resources/icons/WarningCircle-regular.svg"); tint: #b87400; }
+    Label { text: "重复 " + Sources.preview-duplicate-count + " 项"; horizontal-stretch: 0; }
+    Rectangle { width: 8px; }
+    Icon { source: @image-url("../resources/icons/XCircle-regular.svg"); tint: Theme.red; }
+    Label { text: "无效 " + Sources.preview-invalid-count + " 项"; horizontal-stretch: 0; }
+}
+
+component PreviewSettings inherits Rectangle {
+    height: settings-content.preferred-height;
+    background: Theme.blue-soft; border-radius: 8px;
+    settings-content := VerticalLayout {
+        padding: 16px; spacing: 12px; alignment: start;
+        Label { text: "下载设置"; font-size: 15px; font-weight: 650; }
+        Label { text: "保存目录"; font-weight: 600; }
+        Rectangle {
+            height: directory-text.preferred-height + 18px;
+            background: #f6fbff; border-radius: 6px; border-width: 1px; border-color: Theme.border;
+            directory-text := Label { x: 9px; y: 9px; width: parent.width - 18px; text: Sources.preview-directory; wrap: word-wrap; }
+        }
+        Rectangle { height: 1px; background: Theme.border; }
+        HorizontalLayout { Muted { text: "已知大小"; } Label { text: Sources.preview-known-size; horizontal-alignment: right; } }
+        HorizontalLayout { Muted { text: "大小未知"; } Label { text: Sources.preview-unknown-count + " 项"; horizontal-alignment: right; } }
+        HorizontalLayout { Muted { text: "可用空间"; } Label { text: Sources.preview-available-space; horizontal-alignment: right; } }
+        HorizontalLayout {
+            spacing: 6px;
+            Icon { source: @image-url("../resources/icons/Info-regular.svg"); width: 16px; }
+            Muted { text: Sources.preview-space-note; wrap: word-wrap; font-size: 11px; }
+        }
+        Rectangle { height: 1px; background: Theme.border; }
+        Label { text: "下载线路"; font-weight: 600; }
+        route-picker := ComboBox { model: ["自动选择", "GitHub 直连", "GH-Proxy", "ghproxy.net"]; current-index <=> Sources.route; enabled: !Updates.dialog && (!Sources.busy && !Workspace.busy); }
+    }
+}
+
+component BatchConfirmation inherits Rectangle {
+    in property <length> list-height: 340px;
+    private property <bool> stacked: root.width < 660px;
+    height: root.stacked ? files.height + 14px + settings.height : max(files.height, settings.height);
+    files := Panel {
+        x: 0px; y: 0px;
+        width: root.stacked ? parent.width : parent.width - settings.width - 16px;
+        height: root.list-height;
+        VerticalLayout {
+            spacing: 0px;
+            Rectangle {
+                height: 40px;
+                HorizontalLayout { padding-left: 12px; Label { text: "附件列表"; font-weight: 600; } }
+            }
+            Rectangle { height: 1px; background: Theme.border; }
+            preview-list := ListView {
+                for item[index] in Sources.preview: Rectangle {
+                    height: row-content.preferred-height;
+                    Rectangle { y: parent.height - 1px; height: 1px; background: Theme.border; }
+                    row-content := VerticalLayout {
+                        padding: 10px; spacing: 6px; alignment: start;
+                        HorizontalLayout {
+                            height: 26px; spacing: 8px;
+                            Muted { text: index + 1; width: 18px; font-size: 11px; }
+                            Icon { source: item.tone == 2 ? @image-url("../resources/icons/Link-regular.svg") : @image-url("../resources/icons/File-regular.svg"); width: 16px; tint: item.tone == 2 ? Theme.red : Theme.text; }
+                            Label { text: item.name; min-width: 0px; color: item.tone == 2 ? Theme.red : Theme.text; }
+                            if files.width >= 450px: Muted { text: item.size; width: 60px; horizontal-alignment: right; font-size: 11px; }
+                            Badge { text: item.state; tone: item.tone; width: 48px; horizontal-stretch: 0; }
+                        }
+                        if files.width < 450px && item.tone != 2: Muted { text: "大小：" + item.size; font-size: 11px; }
+                        if item.detail != "": Muted { text: item.detail; wrap: word-wrap; font-size: 11px; color: item.tone == 2 ? Theme.red : Theme.muted; }
+                        if item.task-id != "": HorizontalLayout {
+                            alignment: end;
+                            ActionButton { text: "继续原任务"; compact: true; flat: true; enabled: !Updates.dialog && (!Workspace.busy && !Sources.busy); clicked => { Workspace.task-action(item.task-id, "resume"); } }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    settings := PreviewSettings {
+        x: root.stacked ? 0px : files.width + 16px;
+        y: root.stacked ? files.height + 14px : 0px;
+        width: root.stacked ? parent.width : min(280px, (parent.width - 16px) * 0.34);
+    }
+}
+
 component NewDownloadPanel inherits Panel {
     private property <int> mode: Workspace.creation-mode;
     private property <bool> previewing: Sources.preview-visible;
@@ -110,7 +250,8 @@ component NewDownloadPanel inherits Panel {
             Label { text: Sources.preview-visible ? "确认下载任务" : "新建下载"; font-size: root.width < 600px ? 20px : 24px; font-weight: 650; }
             Rectangle { width: 134px; height: 28px; if Sources.busy || Workspace.busy: Muted { text: "正在处理，请稍候…"; horizontal-alignment: right; } }
         }
-        if !Sources.preview-visible && root.height >= 440px: Muted { text: "选择下载资源，预览并确认所需附件。"; }
+        if root.height >= 440px: Muted { text: Sources.preview-visible ? "核对附件与保存位置，仅创建有效任务。" : Workspace.creation-mode == 0 ? "粘贴链接，选择保存位置后开始下载。" : "选择下载资源，预览并确认所需附件。"; }
+        if Sources.preview-visible: PreviewCounts {}
         if !Sources.preview-visible: HorizontalLayout {
             spacing: 8px; alignment: start;
             for title[index] in ["直链下载", "仓库附件", "批量链接"]: ActionButton { enabled: !Updates.dialog;
@@ -123,7 +264,7 @@ component NewDownloadPanel inherits Panel {
             content-width: self.visible-width;
             vertical-stretch: 1;
             VerticalLayout {
-                spacing: 14px; padding-right: 4px;
+                spacing: 14px; padding-right: Sources.preview-visible ? 20px : 4px;
                 alignment: start;
                 if Sources.message != "": VerticalLayout {
                     spacing: 6px;
@@ -132,43 +273,21 @@ component NewDownloadPanel inherits Panel {
                 }
                 if !Sources.preview-visible: VerticalLayout {
                     spacing: 12px;
-                    if Workspace.creation-mode == 0: VerticalLayout {
-                        spacing: 12px;
-                        Label { text: "GitHub 链接"; font-weight: 600; }
-                        Input { height: 42px; text <=> Workspace.url; placeholder: "粘贴 Release 附件直链或仓库地址"; enabled: !Updates.dialog && (!Workspace.busy); edited => { Workspace.input-edited(false); } accepted => { Workspace.create(); } }
-                        Muted { text: "附件直链可直接添加；仓库或版本地址会转到附件选择。"; wrap: word-wrap; }
-                    }
+                    if Workspace.creation-mode == 0: DirectDownloadContent {}
                     if Workspace.creation-mode == 1: SourceBrowser { list-height: max(232px, min(360px, new-scroll.visible-height - 142px)); }
                     if Workspace.creation-mode == 2: VerticalLayout {
                         spacing: 12px;
                         Label { text: "附件直链，每行一个"; font-weight: 600; }
                         TextEdit { text <=> Sources.batch-input; placeholder-text: "在此粘贴多个附件直链，每行一个…"; height: 200px; enabled: !Updates.dialog && (!Sources.busy); edited => { Sources.edited(); } }
                     }
-                    directory-row := HorizontalLayout {
+                    if Workspace.creation-mode != 0: directory-row := HorizontalLayout {
                         height: 42px; spacing: 8px;
                         Label { text: "保存目录"; width: 66px; font-weight: 600; }
-                        Input { text <=> Workspace.directory; placeholder: "输入或选择保存目录"; enabled: !Updates.dialog && (!Workspace.busy && !Sources.busy); edited => { Workspace.input-edited(true); } }
-                        ActionButton { text: "浏览"; icon: @image-url("../resources/icons/FolderOpen-regular.svg"); enabled: !Updates.dialog && (!Workspace.busy && !Sources.busy); clicked => { Workspace.pick-directory(); } }
+                        DirectoryPicker {}
                     }
                     if Workspace.creation-mode == 2: Muted { text: "每批最多 100 项，预览后确认创建。"; wrap: word-wrap; }
                 }
-                if Sources.preview-visible: VerticalLayout {
-                    spacing: 12px;
-                    Message { text: Sources.preview-summary; success: Sources.can-submit; }
-                    Message { text: Sources.preview-space; }
-                    ListView {
-                        height: 240px;
-                        for item in Sources.preview: Rectangle {
-                            height: preview-row.preferred-height;
-                            preview-row := VerticalLayout {
-                                padding: 8px; spacing: 6px;
-                                HorizontalLayout { spacing: 8px; Badge { text: item.state; tone: item.tone; } Label { text: item.name; } }
-                                if item.detail != "": Muted { text: item.detail; wrap: word-wrap; }
-                                if item.task-id != "": HorizontalLayout { alignment: start; ActionButton { text: "继续原任务"; compact: true; enabled: !Updates.dialog && (!Workspace.busy); clicked => { Workspace.task-action(item.task-id, "resume"); } } }
-                            }
-                        }
-                    }
-                }
+                if Sources.preview-visible: BatchConfirmation { list-height: max(196px, min(448px, new-scroll.visible-height - 6px)); }
             }
         }
         Rectangle { height: 1px; background: Theme.border; }
@@ -179,17 +298,14 @@ component NewDownloadPanel inherits Panel {
             if Workspace.creation-mode == 1: ActionButton { text: "预览所选附件"; primary: true; pending: Sources.busy; enabled: !Updates.dialog && (!Workspace.busy && Sources.selected-count > 0 && Workspace.directory != ""); clicked => { Sources.preview-batch(true); } }
             if Workspace.creation-mode == 2: ActionButton { text: "预览批量链接"; primary: true; pending: Sources.busy; enabled: !Updates.dialog && (!Workspace.busy && Sources.batch-input != "" && Workspace.directory != ""); clicked => { Sources.preview-batch(false); } }
         }
-        if Sources.preview-visible: VerticalLayout {
+        if Sources.preview-visible: HorizontalLayout {
             spacing: 8px;
-            HorizontalLayout {
-                spacing: 8px; alignment: start;
-                Label { text: "下载线路"; horizontal-stretch: 0; }
-                ComboBox { model: ["自动选择", "GitHub 直连", "GH-Proxy", "ghproxy.net"]; current-index <=> Sources.route; enabled: !Updates.dialog && (!Sources.busy); }
-            }
+            if root.width >= 660px: Muted { text: "重复项和无效项不会重复创建"; font-size: 11px; }
+            Rectangle { horizontal-stretch: 1; }
             HorizontalLayout {
                 spacing: 8px; alignment: end;
                 ActionButton { enabled: !Updates.dialog; text: "返回修改"; compact: true; pending: Sources.busy; clicked => { Sources.dismiss-preview(); } }
-                ActionButton { text: "确认创建有效任务"; icon: @image-url("../resources/icons/CheckCircle-regular.svg"); primary: true; compact: true; pending: Sources.busy; enabled: !Updates.dialog && (!Workspace.busy && Sources.can-submit); clicked => { Sources.submit(); } }
+                ActionButton { text: "创建 " + Sources.preview-valid-count + " 个有效任务"; icon: @image-url("../resources/icons/CheckCircle-regular.svg"); primary: true; compact: true; pending: Sources.busy; enabled: !Updates.dialog && (!Workspace.busy && Sources.can-submit); clicked => { Sources.submit(); } }
             }
         }
     }

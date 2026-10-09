@@ -122,40 +122,46 @@ fn render(window: &MainWindow, state: &State) {
     if let Some(preview) = &state.preview {
         let valid = preview.items.iter().filter(|r| r.status == "valid").count();
         ui.set_can_submit(valid > 0);
-        ui.set_preview_summary(
-            format!(
-                "有效 {valid} 项 · 重复 {} 项 · 无效 {} 项",
-                preview
-                    .items
-                    .iter()
-                    .filter(|r| r.status == "duplicate")
-                    .count(),
-                preview
-                    .items
-                    .iter()
-                    .filter(|r| r.status == "invalid")
-                    .count()
-            )
-            .into(),
+        ui.set_preview_valid_count(valid as i32);
+        ui.set_preview_duplicate_count(
+            preview
+                .items
+                .iter()
+                .filter(|r| r.status == "duplicate")
+                .count() as i32,
         );
-        ui.set_preview_space(
-            format!(
-                "已知总大小 {} · 大小未知 {} 项 · 可用空间 {}\n{} 目标：{}",
-                presentation::bytes(preview.known_size),
-                preview.unknown_count,
-                preview
-                    .preflight
-                    .available
-                    .map(presentation::bytes)
-                    .unwrap_or_else(|| "未知大小".into()),
-                preview
-                    .preflight
-                    .warning
-                    .as_deref()
-                    .unwrap_or("已按分片与合并文件检查空间。"),
-                preview.preflight.directory.display()
-            )
-            .into(),
+        ui.set_preview_invalid_count(
+            preview
+                .items
+                .iter()
+                .filter(|r| r.status == "invalid")
+                .count() as i32,
+        );
+        ui.set_preview_directory(
+            preview
+                .preflight
+                .directory
+                .to_string_lossy()
+                .as_ref()
+                .into(),
+        );
+        ui.set_preview_known_size(presentation::bytes(preview.known_size).into());
+        ui.set_preview_unknown_count(preview.unknown_count as i32);
+        ui.set_preview_available_space(
+            preview
+                .preflight
+                .available
+                .map(presentation::bytes)
+                .unwrap_or_else(|| "未知".into())
+                .into(),
+        );
+        ui.set_preview_space_note(
+            preview
+                .preflight
+                .warning
+                .as_deref()
+                .unwrap_or("已按分片与合并文件检查空间。")
+                .into(),
         );
         ui.set_preview(model(
             preview
@@ -163,6 +169,11 @@ fn render(window: &MainWindow, state: &State) {
                 .iter()
                 .map(|r| PreviewRow {
                     name: r.filename.as_deref().unwrap_or(&r.input).into(),
+                    size: r
+                        .size
+                        .map(presentation::bytes)
+                        .unwrap_or_else(|| "未知".into())
+                        .into(),
                     state: match r.status.as_str() {
                         "valid" => "有效",
                         "duplicate" => "重复",
@@ -171,7 +182,11 @@ fn render(window: &MainWindow, state: &State) {
                     .into(),
                     detail: r.message.as_deref().unwrap_or("").into(),
                     task_id: r.task_id.as_deref().unwrap_or("").into(),
-                    tone: if r.status == "valid" { 1 } else { 3 },
+                    tone: match r.status.as_str() {
+                        "valid" => 1,
+                        "duplicate" => 3,
+                        _ => 2,
+                    },
                 })
                 .collect(),
         ));
