@@ -955,6 +955,245 @@ async fn verify_selected_download_layouts(window: &MainWindow, api: &Arc<Service
     workspace.invoke_navigate(previous_page);
 }
 
+fn verify_queue_display_order(original: &githubsp_lib::model::Snapshot) {
+    use std::{cell::RefCell, rc::Rc};
+
+    fn row(window: &MainWindow, filename: &str) -> ElementHandle {
+        ElementHandle::find_by_element_type_name(window, "DownloadRow")
+            .find(|row| {
+                let filename = filename.to_owned();
+                row.query_descendants()
+                    .match_predicate(move |item| {
+                        item.accessible_label()
+                            .is_some_and(|label| label == filename)
+                    })
+                    .find_first()
+                    .is_some()
+            })
+            .unwrap_or_else(|| panic!("应显示任务行 {filename}"))
+    }
+
+    fn button(row: &ElementHandle, label: &str) -> ElementHandle {
+        let label = label.to_owned();
+        row.query_descendants()
+            .match_accessible_role(i_slint_backend_testing::AccessibleRole::Button)
+            .match_predicate(move |item| {
+                item.accessible_label().is_some_and(|value| value == label)
+            })
+            .find_first()
+            .expect("任务行应包含对应操作")
+    }
+
+    fn displayed_ids(window: &MainWindow) -> Vec<String> {
+        window
+            .global::<Workspace>()
+            .get_tasks()
+            .iter()
+            .map(|task| task.id.to_string())
+            .collect()
+    }
+
+    fn assert_numbers(window: &MainWindow) {
+        window.window().take_snapshot().unwrap();
+        let header = ElementHandle::find_by_element_id(window, "QueuePanel::number-header")
+            .next()
+            .unwrap();
+        assert_eq!(header.accessible_label().as_deref(), Some("序号"));
+        assert_eq!(header.size().width, 36.0);
+        let mut previous_y = header.absolute_position().y;
+        for (index, task) in window.global::<Workspace>().get_tasks().iter().enumerate() {
+            let number = row(window, &task.filename)
+                .query_descendants()
+                .match_id("DownloadRow::number-label")
+                .find_first()
+                .unwrap();
+            assert_eq!(number.accessible_label().unwrap(), (index + 1).to_string());
+            assert_eq!(number.size().width, header.size().width);
+            assert_eq!(number.absolute_position().x, header.absolute_position().x);
+            assert!(number.absolute_position().y > previous_y);
+            previous_y = number.absolute_position().y;
+        }
+    }
+
+    let window = MainWindow::new().unwrap();
+    let workspace = window.global::<Workspace>();
+    let mut snapshot = original.clone();
+    snapshot.tasks = [
+        ("running", TaskStatus::Downloading),
+        ("early", TaskStatus::Queued),
+        ("middle", TaskStatus::Queued),
+        ("complete", TaskStatus::Completed),
+        ("latest", TaskStatus::Queued),
+    ]
+    .into_iter()
+    .enumerate()
+    .map(|(index, (id, status))| {
+        let mut task = original.tasks[0].clone();
+        task.id = id.into();
+        task.filename = format!("{id}.zip");
+        task.created_at = index as u64;
+        task.details.queue_position = index as u64;
+        task.status = status;
+        task
+    })
+    .collect();
+    snapshot.total_tasks = snapshot.tasks.len();
+    snapshot.completed_tasks = 1;
+    let actions = Rc::new(RefCell::new(Vec::new()));
+    let recorded = actions.clone();
+    // 只拦截外部操作，实际行控件和生产展示映射仍参与验收。
+    workspace.on_task_action(move |id, action| {
+        recorded
+            .borrow_mut()
+            .push((id.to_string(), action.to_string()))
+    });
+    presentation::apply(&window, &snapshot);
+    window.show().unwrap();
+    capture(&window, "queue-newest-first", 1448, 1086);
+    let expected = ["latest", "complete", "middle", "early", "running"];
+    assert_eq!(displayed_ids(&window), expected);
+    assert_numbers(&window);
+    for label in ["暂停下载", "取消下载"] {
+        button(&row(&window, "latest.zip"), label).invoke_accessible_default_action();
+    }
+    button(&row(&window, "complete.zip"), "打开所在目录").invoke_accessible_default_action();
+    assert_eq!(
+        *actions.borrow(),
+        [
+            ("latest".into(), "pause".into()),
+            ("latest".into(), "cancel".into()),
+            ("complete".into(), "open".into())
+        ]
+    );
+    button(&row(&window, "latest.zip"), "下载详情与更多操作").invoke_accessible_default_action();
+    assert_eq!(workspace.get_expanded_task(), "latest");
+    window.window().take_snapshot().unwrap();
+    assert_eq!(
+        workspace.get_tasks().row_data(0).unwrap().queue_order,
+        "第 3 位"
+    );
+    assert_eq!(
+        button(&row(&window, "latest.zip"), "延后一位").accessible_enabled(),
+        Some(false)
+    );
+
+    for (label, action, position) in [
+        ("提前一位", "up", 2),
+        ("优先下载", "top", 1),
+        ("延后一位", "down", 2),
+    ] {
+        button(&row(&window, "latest.zip"), label).invoke_accessible_default_action();
+        assert_eq!(
+            actions.borrow().last().unwrap(),
+            &("latest".into(), action.into())
+        );
+        let ids = controller::reordered(&snapshot, "latest", action).unwrap();
+        let ordered: Vec<_> = ids
+            .iter()
+            .map(|id| {
+                snapshot
+                    .tasks
+                    .iter()
+                    .find(|task| &task.id == id)
+                    .unwrap()
+                    .clone()
+            })
+            .collect();
+        for (task, next) in snapshot
+            .tasks
+            .iter_mut()
+            .filter(|task| task.status == TaskStatus::Queued)
+            .zip(ordered)
+        {
+            *task = next;
+        }
+        presentation::apply(&window, &snapshot);
+        window.window().take_snapshot().unwrap();
+        assert_eq!(displayed_ids(&window), expected);
+        assert_eq!(snapshot.tasks[0].id, "running");
+        assert_eq!(snapshot.tasks[0].status, TaskStatus::Downloading);
+        assert_eq!(
+            workspace.get_tasks().row_data(0).unwrap().queue_order,
+            format!("第 {position} 位")
+        );
+        let latest = row(&window, "latest.zip");
+        assert_eq!(
+            button(&latest, "提前一位").accessible_enabled(),
+            Some(position != 1)
+        );
+        assert_eq!(
+            button(&latest, "优先下载").accessible_enabled(),
+            Some(position != 1)
+        );
+        if position == 1 {
+            let count = actions.borrow().len();
+            button(&latest, "提前一位").invoke_accessible_default_action();
+            assert_eq!(actions.borrow().len(), count);
+        }
+    }
+
+    let mut added = snapshot.tasks[0].clone();
+    added.id = "single".into();
+    added.filename = "single.zip".into();
+    added.created_at = 10;
+    snapshot.tasks.push(added.clone());
+    presentation::apply(&window, &snapshot);
+    assert_eq!(workspace.get_tasks().row_data(0).unwrap().id, "single");
+    assert_eq!(workspace.get_expanded_task(), "latest");
+    workspace.set_expanded_task("".into());
+    assert_numbers(&window);
+    for id in ["batch-a", "batch-b"] {
+        added.id = id.into();
+        added.filename = format!("{id}.zip");
+        added.created_at = 20;
+        snapshot.tasks.push(added.clone());
+    }
+    presentation::apply(&window, &snapshot);
+    assert_eq!(
+        &displayed_ids(&window)[..3],
+        ["batch-b", "batch-a", "single"]
+    );
+    assert_numbers(&window);
+    snapshot
+        .tasks
+        .retain(|task| !matches!(task.id.as_str(), "single" | "batch-a" | "batch-b"));
+    presentation::apply(&window, &snapshot);
+    assert_eq!(displayed_ids(&window), expected);
+    assert_numbers(&window);
+    button(&row(&window, "complete.zip"), "打开所在目录").invoke_accessible_default_action();
+    assert_eq!(
+        actions.borrow().last().unwrap(),
+        &("complete".into(), "open".into())
+    );
+
+    for (width, height) in [(1448, 1086), (1040, 740), (720, 520)] {
+        workspace.set_expanded_task("".into());
+        // 每种尺寸从列表顶部开始，避免上一轮详情滚动影响下一轮定位。
+        ElementHandle::find_by_element_id(&window, "QueuePanel::queue-list")
+            .next()
+            .unwrap()
+            .scroll(0.0, 100_000.0);
+        capture(&window, "queue-newest-first", width, height);
+        button(&row(&window, "latest.zip"), "下载详情与更多操作")
+            .invoke_accessible_default_action();
+        capture(&window, "queue-priority-detail", width, height);
+        assert!(
+            ElementHandle::find_by_accessible_label(&window, "待下载顺序")
+                .next()
+                .is_some()
+        );
+        assert!(ElementHandle::find_by_accessible_label(&window, "第 2 位")
+            .next()
+            .is_some());
+        scroll_to_button(&window, "优先下载", height);
+        for label in ["提前一位", "延后一位", "优先下载"] {
+            assert_button_in_window(&window, label, width, height);
+        }
+        capture(&window, "queue-priority-actions", width, height);
+    }
+    window.hide().unwrap();
+}
+
 fn verify_presented_states(window: &MainWindow, original: &githubsp_lib::model::Snapshot) {
     let workspace = window.global::<Workspace>();
     workspace.invoke_navigate(0);
@@ -1326,6 +1565,7 @@ fn module_pages_bind_to_core_and_remain_usable_at_supported_sizes() {
         assert_eq!(failed_settings.get_limit(),"2.5");
         assert!(!failed_settings.get_saved());
         assert!(!failed_settings.get_message().is_empty());
+        verify_queue_display_order(&api1.manager.snapshot().await.unwrap());
         verify_presented_states(&window,&api1.manager.snapshot().await.unwrap());
         verify_secondary_windows();
         crate::completion::tests::verify_lifecycle(&window).await;

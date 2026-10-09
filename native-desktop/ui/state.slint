@@ -4,7 +4,7 @@ export struct TaskRow {
     source-url: string, save-path: string, downloaded: string, elapsed: string,
     failure: string, feedback: string, suggestion: string, suggestion-id: string,
     resume: bool, pause: bool, cancel: bool, stopping: bool, completed: bool,
-    removable: bool, queued: bool, first: bool, last: bool,
+    removable: bool, queued: bool, first: bool, last: bool, queue-order: string,
     repository: string, preferred-route: int, route-editable: bool,
 }
 export struct RouteRow { id: string, name: string, speed: string, state: string, detail: string, tone: int }

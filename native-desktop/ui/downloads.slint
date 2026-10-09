@@ -473,9 +473,9 @@ component DetailActions inherits VerticalLayout {
     }
     if root.task.queued: HorizontalLayout {
         spacing: 8px; alignment: start;
-        ActionButton { text: "上移"; compact: true; enabled: !Updates.dialog && (!Workspace.busy && !root.task.first); clicked => { Workspace.task-action(root.task.id, "up"); } }
-        ActionButton { text: "下移"; compact: true; enabled: !Updates.dialog && (!Workspace.busy && !root.task.last); clicked => { Workspace.task-action(root.task.id, "down"); } }
-        ActionButton { text: "置顶"; compact: true; enabled: !Updates.dialog && (!Workspace.busy && !root.task.first); clicked => { Workspace.task-action(root.task.id, "top"); } }
+        ActionButton { text: "提前一位"; compact: true; enabled: !Updates.dialog && (!Workspace.busy && !root.task.first); clicked => { Workspace.task-action(root.task.id, "up"); } }
+        ActionButton { text: "延后一位"; compact: true; enabled: !Updates.dialog && (!Workspace.busy && !root.task.last); clicked => { Workspace.task-action(root.task.id, "down"); } }
+        ActionButton { text: "优先下载"; compact: true; enabled: !Updates.dialog && (!Workspace.busy && !root.task.first); clicked => { Workspace.task-action(root.task.id, "top"); } }
     }
     if root.task.removable: HorizontalLayout { alignment: start; ActionButton { text: "移除记录，保留文件"; compact: true; danger: true; enabled: !Updates.dialog && (!Workspace.busy); clicked => { Workspace.task-action(root.task.id, "remove"); } } }
 }
@@ -490,7 +490,7 @@ component DownloadRow inherits Rectangle {
         spacing: 0px;
         if !root.compact: HorizontalLayout {
             height: 46px; padding-left: 12px; padding-right: 12px; spacing: 8px;
-            Muted { text: root.number; width: 20px; }
+            number-label := Muted { text: root.number; width: 36px; }
             Label { text: root.task.filename; horizontal-stretch: 1; min-width: 90px; }
             Muted { text: root.task.size; width: 65px; }
             ProgressCell { progress: root.task.progress; percent: root.task.percent; width: 120px; }
@@ -543,6 +543,7 @@ component DownloadRow inherits Rectangle {
                         width: parent.stacked ? parent.width : parent.width - 332px;
                         height: self.preferred-height; spacing: 8px;
                         DetailField { title: "完整文件名"; value: root.task.filename; }
+                        if root.task.queued: DetailField { title: "待下载顺序"; value: root.task.queue-order; }
                         DetailField { title: "来源链接"; value: root.task.source-url; }
                         DetailField { title: "保存位置"; value: root.task.save-path; }
                         DetailField { title: "已下载"; value: root.task.downloaded; }
@@ -595,7 +596,7 @@ component QueuePanel inherits Panel {
             height: 36px; background: Theme.subtle;
             HorizontalLayout {
                 padding-left: 12px; padding-right: 12px; spacing: 8px;
-                Label { text: "#"; width: 20px; } Label { text: "文件名"; min-width: 90px; horizontal-stretch: 1; } Label { text: "大小"; width: 65px; } Label { text: "进度"; width: 120px; } Label { text: "速度"; width: 105px; } Label { text: "剩余时间"; width: 76px; } Label { text: "线路"; width: 75px; } Label { text: "状态"; width: 94px; } Label { text: "操作"; width: 108px; horizontal-alignment: right; }
+                number-header := Label { text: "序号"; width: 36px; } Label { text: "文件名"; min-width: 90px; horizontal-stretch: 1; } Label { text: "大小"; width: 65px; } Label { text: "进度"; width: 120px; } Label { text: "速度"; width: 105px; } Label { text: "剩余时间"; width: 76px; } Label { text: "线路"; width: 75px; } Label { text: "状态"; width: 94px; } Label { text: "操作"; width: 108px; horizontal-alignment: right; }
             }
         }
         if Workspace.tasks.length == 0: VerticalLayout {

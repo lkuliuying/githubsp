@@ -104,7 +104,7 @@ pub fn pausable(status: TaskStatus) -> bool {
     )
 }
 
-pub fn task_row(task: &Task, first: Option<&str>, last: Option<&str>) -> TaskRow {
+fn task_row(task: &Task, queue_position: Option<usize>, queued_count: usize) -> TaskRow {
     let total = task.total.map(bytes).unwrap_or_else(|| "未知大小".into());
     let mut failure = task
         .details
@@ -208,10 +208,32 @@ pub fn task_row(task: &Task, first: Option<&str>, last: Option<&str>) -> TaskRow
         resume: task.status.resumable() || task.status == TaskStatus::WaitingNetwork, pause: pausable(task.status),
         cancel: !matches!(task.status, TaskStatus::Completed | TaskStatus::Cancelled), stopping: matches!(task.status, TaskStatus::Pausing | TaskStatus::Cancelling), completed: task.status == TaskStatus::Completed,
         removable: matches!(task.status, TaskStatus::Completed | TaskStatus::Cancelled), queued: task.status == TaskStatus::Queued,
-        first: first == Some(task.id.as_str()), last: last == Some(task.id.as_str()), repository: task.details.repository.as_deref().unwrap_or("").into(),
+        first: queue_position == Some(1), last: queue_position == Some(queued_count),
+        queue_order: queue_position.map(|position| format!("第 {position} 位")).unwrap_or_default().into(),
+        repository: task.details.repository.as_deref().unwrap_or("").into(),
         preferred_route: ROUTES.iter().position(|r|Some(r.0) == task.details.preferred_route.as_deref()).unwrap_or(0) as i32,
         route_editable: matches!(task.status, TaskStatus::Queued | TaskStatus::Paused | TaskStatus::Failed | TaskStatus::WaitingNetwork),
     }
+}
+
+fn task_rows(tasks: &[Task]) -> Vec<TaskRow> {
+    // 先按后台快照计算执行位次，再独立排序展示，避免界面倒序改变下载优先级。
+    let mut queued_count = 0;
+    let mut ordered: Vec<_> = tasks
+        .iter()
+        .map(|task| {
+            let position = (task.status == TaskStatus::Queued).then(|| {
+                queued_count += 1;
+                queued_count
+            });
+            (task, position)
+        })
+        .collect();
+    ordered.sort_unstable_by(|(a, _), (b, _)| (b.created_at, &b.id).cmp(&(a.created_at, &a.id)));
+    ordered
+        .into_iter()
+        .map(|(task, position)| task_row(task, position, queued_count))
+        .collect()
 }
 
 pub fn model<T: Clone + 'static>(rows: Vec<T>) -> ModelRc<T> {
@@ -269,16 +291,7 @@ pub fn apply(window: &MainWindow, snapshot: &Snapshot) {
         .iter()
         .filter(|t| t.status == TaskStatus::Queued)
         .collect();
-    let first = queued.first().map(|t| t.id.as_str());
-    let last = queued.last().map(|t| t.id.as_str());
-    ui.set_tasks(update_model(
-        ui.get_tasks(),
-        snapshot
-            .tasks
-            .iter()
-            .map(|t| task_row(t, first, last))
-            .collect(),
-    ));
+    ui.set_tasks(update_model(ui.get_tasks(), task_rows(&snapshot.tasks)));
     ui.set_status(
         format!(
             "共 {} 个任务 · {} 个传输中 · {} 个排队中 · {} 个等待线路恢复（保留最近 50 条结束记录，完整记录见历史）",
@@ -411,6 +424,107 @@ pub fn apply(window: &MainWindow, snapshot: &Snapshot) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn task(id: &str, created_at: u64, status: TaskStatus) -> Task {
+        Task {
+            id: id.into(),
+            filename: format!("{id}.zip"),
+            url: format!("https://github.com/test/project/releases/download/v1/{id}.zip"),
+            directory: "downloads".into(),
+            status,
+            downloaded: 0,
+            total: Some(100),
+            speed: 0.0,
+            eta: None,
+            route: None,
+            verification: Verification::Pending,
+            error: None,
+            final_path: None,
+            created_at,
+            revision: 0,
+            details: Default::default(),
+        }
+    }
+
+    fn ids(rows: &[TaskRow]) -> Vec<&str> {
+        rows.iter().map(|row| row.id.as_str()).collect()
+    }
+
+    #[test]
+    fn queue_rows_handle_empty_and_single_tasks() {
+        assert!(task_rows(&[]).is_empty());
+        let rows = task_rows(&[task("only", 1, TaskStatus::Queued)]);
+        assert_eq!(ids(&rows), ["only"]);
+        assert_eq!(rows[0].queue_order, "第 1 位");
+        assert!(rows[0].first && rows[0].last);
+        let rows = task_rows(&[task("only", 1, TaskStatus::Completed)]);
+        assert!(rows[0].queue_order.is_empty());
+        assert!(!rows[0].first && !rows[0].last);
+    }
+
+    #[test]
+    fn queue_rows_separate_creation_order_from_download_priority() {
+        let mut tasks = vec![
+            task("running", 1, TaskStatus::Downloading),
+            task("a", 10, TaskStatus::Queued),
+            task("paused", 30, TaskStatus::Paused),
+            task("b", 20, TaskStatus::Queued),
+            task("c", 20, TaskStatus::Queued),
+        ];
+        let rows = task_rows(&tasks);
+        assert_eq!(ids(&rows), ["paused", "c", "b", "a", "running"]);
+        assert_eq!(rows[1].queue_order, "第 3 位");
+        assert!(rows[1].last && !rows[1].first);
+        assert_eq!(rows[2].queue_order, "第 2 位");
+        assert!(!rows[2].first && !rows[2].last);
+        assert_eq!(rows[3].queue_order, "第 1 位");
+        assert!(rows[3].first && !rows[3].last);
+        assert!(rows[0].queue_order.is_empty() && rows[4].queue_order.is_empty());
+
+        tasks.swap(1, 4);
+        let reordered = task_rows(&tasks);
+        assert_eq!(ids(&reordered), ids(&rows));
+        assert_eq!(reordered[1].queue_order, "第 1 位");
+        assert!(reordered[1].first && !reordered[1].last);
+        assert_eq!(reordered[3].queue_order, "第 3 位");
+        assert!(reordered[3].last && !reordered[3].first);
+        assert_eq!(tasks[0].status, TaskStatus::Downloading);
+    }
+
+    #[test]
+    fn queue_rows_keep_order_on_refresh_and_show_new_tasks_first() {
+        let mut tasks = vec![
+            task("old", 1, TaskStatus::Downloading),
+            task("new", 2, TaskStatus::Queued),
+        ];
+        for status in [
+            TaskStatus::Paused,
+            TaskStatus::Retrying,
+            TaskStatus::Completed,
+        ] {
+            tasks[0].status = status;
+            tasks[0].downloaded += 10;
+            tasks[0].speed = 5.0;
+            tasks[0].revision += 1;
+            assert_eq!(ids(&task_rows(&tasks)), ["new", "old"]);
+        }
+        tasks.push(task("single", 3, TaskStatus::Queued));
+        assert_eq!(ids(&task_rows(&tasks)), ["single", "new", "old"]);
+        tasks.extend([
+            task("batch-a", 4, TaskStatus::Queued),
+            task("batch-b", 4, TaskStatus::Queued),
+        ]);
+        assert_eq!(
+            ids(&task_rows(&tasks)),
+            ["batch-b", "batch-a", "single", "new", "old"]
+        );
+        tasks.retain(|task| task.id != "single");
+        assert_eq!(
+            ids(&task_rows(&tasks)),
+            ["batch-b", "batch-a", "new", "old"]
+        );
+    }
+
     #[test]
     fn units_and_statuses_match_webview() {
         assert_eq!(bytes(0), "0 B");
