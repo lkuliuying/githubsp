@@ -44,18 +44,13 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         .enable_all()
         .build()?;
     let graphics = runtime.block_on(graphics::shared_device())?;
+    let completion_creation = completion::CreationContext::default();
+    let creation_hook = completion_creation.clone();
     slint::BackendSelector::new()
         .backend_name("winit".into())
         .renderer_name("femtovg-wgpu".into())
         .require_wgpu_30(graphics)
-        .with_winit_window_attributes_hook(|attributes| {
-            use slint::winit_030::winit::platform::windows::WindowAttributesExtWindows;
-            if attributes.title == "GitHubSP · 下载完成" {
-                attributes.with_active(false).with_skip_taskbar(true)
-            } else {
-                attributes
-            }
-        })
+        .with_winit_window_attributes_hook(move |attributes| creation_hook.attributes(attributes))
         .select()?;
     let window = MainWindow::new()?;
     let directory = platform::data_directory()?;
@@ -77,8 +72,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     controller::apply(&window, &snapshot);
     controller::bind_shutdown(&window, &service, runtime.handle());
     let _tray = desktop::install(&window, &service, runtime.handle())?;
-    let notice = completion::Host::new(&window);
+    let notice = completion::Host::new(&window, completion_creation);
     notice.update(&snapshot);
+    let notice_events = notice.clone();
     let (weak, api) = (window.as_weak(), service.clone());
     window.on_refresh_state(move || {
         let snapshot = api.state.borrow().clone();
@@ -86,7 +82,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             if api.visible.load(Ordering::Acquire) {
                 controller::apply(&window, &snapshot);
             }
-            notice.update(&snapshot);
+            notice_events.update(&snapshot);
         }
     });
     about::install(&window);
@@ -124,6 +120,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let result = window
         .show()
         .and_then(|()| slint::run_event_loop_until_quit());
+    notice.shutdown();
     pump.abort();
     if !service.is_closing() {
         runtime.block_on(service.shutdown())?;

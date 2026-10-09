@@ -1328,6 +1328,7 @@ fn module_pages_bind_to_core_and_remain_usable_at_supported_sizes() {
         assert!(!failed_settings.get_message().is_empty());
         verify_presented_states(&window,&api1.manager.snapshot().await.unwrap());
         verify_secondary_windows();
+        crate::completion::tests::verify_lifecycle(&window).await;
         verify_dialog_keyboard(&window);
         done.set(true); slint::quit_event_loop().unwrap();
     }).unwrap();
