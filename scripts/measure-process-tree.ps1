@@ -51,7 +51,7 @@ $measureResult = [ordered]@{
     MeanCpuPercentOneCore=($measureRecords | Where-Object { $null -ne $_.CpuPercentOneCore } | Measure-Object CpuPercentOneCore -Average).Average
     GpuUsage=$null;StartupTime=$null;Samples=$measureRecords
 }
-$measureDestination = Join-Path $measureRoot 'artifacts/native-migration/measurements'
+$measureDestination = Join-Path $measureRoot 'artifacts/verification/measurements'
 New-Item -ItemType Directory -Path $measureDestination -Force | Out-Null
 $measureOutput = Join-Path $measureDestination "$Label-$([DateTime]::UtcNow.ToString('yyyyMMdd-HHmmss')).json"
 $measureResult | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $measureOutput -Encoding utf8

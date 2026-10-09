@@ -5,7 +5,7 @@ $historyArgs = @('build', '-p', 'githubsp-core', '--example', 'history_scaling',
 if ($Offline) { $historyArgs += '--offline' }
 & (Join-Path $PSScriptRoot 'native-cargo.ps1') -CargoArguments $historyArgs
 $historyExe = Join-Path $historyRoot 'native-desktop/target/x86_64-pc-windows-msvc/release/examples/history_scaling.exe'
-$historyOutput = Join-Path $historyRoot ('artifacts/slint-retirement/history-' + [DateTime]::UtcNow.ToString('yyyyMMdd-HHmmss'))
+$historyOutput = Join-Path $historyRoot ('artifacts/verification/history-' + [DateTime]::UtcNow.ToString('yyyyMMdd-HHmmss'))
 New-Item -ItemType Directory -Path $historyOutput | Out-Null
 $historyResults = @()
 foreach ($historyCount in @(1000,10000,100000)) {

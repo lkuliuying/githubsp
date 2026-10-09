@@ -1,7 +1,7 @@
 param(
     [switch]$Offline,
     [string]$ReleaseRepository = 'lkuliuying/githubsp',
-    [ValidateNotNullOrEmpty()][string]$OutputDirectory = 'artifacts/slint-retirement/package'
+    [ValidateNotNullOrEmpty()][string]$OutputDirectory = 'artifacts/build/portable'
 )
 $ErrorActionPreference = 'Stop'
 $packageRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))

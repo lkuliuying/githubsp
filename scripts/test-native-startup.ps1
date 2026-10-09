@@ -3,7 +3,7 @@ $ErrorActionPreference = 'Stop'
 $startupRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $startupExe = (Resolve-Path -LiteralPath $Executable).Path
 if (-not $startupExe.StartsWith($startupRoot + [IO.Path]::DirectorySeparatorChar,[StringComparison]::OrdinalIgnoreCase)) { throw '仅验收当前工作区内的原生产物。' }
-$startupOutput = Join-Path $startupRoot ('artifacts/slint-retirement/startup-' + [DateTime]::UtcNow.ToString('yyyyMMdd-HHmmss'))
+$startupOutput = Join-Path $startupRoot ('artifacts/verification/startup-' + [DateTime]::UtcNow.ToString('yyyyMMdd-HHmmss'))
 $startupData = Join-Path $startupOutput '中文 隔离数据'
 New-Item -ItemType Directory -Path $startupData | Out-Null
 $startupTimer = [Diagnostics.Stopwatch]::StartNew()
