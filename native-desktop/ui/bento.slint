@@ -1,0 +1,209 @@
+import { Motion, MotionCurves } from "motion.slint";
+import { Theme } from "theme.slint";
+
+export struct BentoRect { x: length, y: length, width: length, height: length }
+
+// 几何只在内容坐标中插值；滚动偏移在绘制时直接叠加。
+export component MagneticIndicator inherits Rectangle {
+    in property <BentoRect> target;
+    in property <length> content-x;
+    in property <length> content-y;
+    in property <bool> shown;
+    in property <bool> interpolate;
+    in property <duration> duration: Motion.magnetic;
+    in property <easing> easing: MotionCurves.magnetic;
+    in property <duration> fade-duration: Motion.instant;
+    in property <length> radius: Theme.panel-radius;
+    private property <length> magnetic-x: target.x;
+    private property <length> magnetic-y: target.y;
+    private property <length> magnetic-width: target.width;
+    private property <length> magnetic-height: target.height;
+    animate magnetic-x, magnetic-y, magnetic-width, magnetic-height {
+        enabled: root.interpolate && !Motion.reduce;
+        duration: root.duration;
+        easing: root.easing;
+    }
+    x: content-x + (Motion.reduce ? target.x : magnetic-x);
+    y: content-y + (Motion.reduce ? target.y : magnetic-y);
+    width: Motion.reduce ? target.width : magnetic-width;
+    height: Motion.reduce ? target.height : magnetic-height;
+    opacity: shown ? 1 : 0;
+    animate opacity { enabled: !Motion.reduce; duration: root.fade-duration; easing: ease-out; }
+    border-radius: radius;
+    border-width: 1px;
+    border-color: Theme.green;
+    background: transparent;
+}
+
+export component BentoGrid inherits Rectangle {
+    in property <bool> active: true;
+    in property <length> content-x;
+    in property <length> content-y;
+    in property <duration> duration: Motion.magnetic;
+    in property <easing> easing: MotionCurves.magnetic;
+    in property <duration> gap-delay: Motion.magnetic-gap;
+    in property <length> hover-outset: Motion.card-lift;
+    out property <length> origin-x: self.absolute-position.x - content-x;
+    out property <length> origin-y: self.absolute-position.y - content-y;
+    out property <string> target-key;
+    private property <BentoRect> target;
+    private property <bool> interpolate;
+    private property <bool> valid-target;
+    private property <string> leaving-key;
+    private property <bool> reduced: Motion.reduce;
+    callback reset();
+    callback claim(string, BentoRect);
+    callback update-card(string, BentoRect);
+    callback leave(string);
+    callback forget(string);
+    reset => {
+        gap.stop();
+        root.target-key = "";
+        root.leaving-key = "";
+        root.valid-target = false;
+        root.interpolate = false;
+    }
+    claim(key, rect) => {
+        if root.active && key != "" {
+            gap.stop();
+            root.leaving-key = "";
+            if key != root.target-key { root.interpolate = root.target-key != ""; }
+            root.target = rect;
+            root.target-key = key;
+            root.valid-target = true;
+        }
+    }
+    update-card(key, rect) => {
+        if root.active && root.target-key == key && key != "" { root.target = rect; }
+    }
+    leave(key) => {
+        if root.target-key == key && key != "" {
+            root.leaving-key = key;
+            if Motion.reduce || root.gap-delay == 0ms { root.reset(); }
+            else { gap.running = true; gap.restart(); }
+        }
+    }
+    forget(key) => { if root.target-key == key { root.reset(); } }
+    changed active => { if !self.active { self.reset(); } }
+    changed reduced => { if self.reduced && self.leaving-key != "" { self.reset(); } }
+    gap := Timer {
+        running: false;
+        interval: root.gap-delay;
+        triggered => {
+            self.stop();
+            if root.target-key == root.leaving-key { root.target-key = ""; }
+            root.leaving-key = "";
+        }
+    }
+    @children
+    // 只给指示层预留抬升空间，首行上边框不会被列表视口裁掉。
+    Rectangle {
+        y: -root.hover-outset;
+        width: root.width; height: root.height + root.hover-outset;
+        clip: true;
+        indicator := MagneticIndicator {
+            visible: root.active && root.valid-target;
+            target: root.target;
+            content-x: root.content-x;
+            content-y: root.content-y + root.hover-outset;
+            shown: root.target-key != "";
+            interpolate: root.interpolate;
+            duration: root.duration;
+            easing: root.easing;
+        }
+    }
+}
+
+// 命中区固定，观察器位于子控件的父级；视觉层移动不会改变列表布局。
+export component BentoCard inherits Rectangle {
+    in property <string> card-key;
+    in property <bool> interactive: true;
+    in property <length> origin-x;
+    in property <length> origin-y;
+    in property <duration> hover-duration: Motion.hover;
+    in property <duration> press-duration: Motion.press;
+    in property <easing> easing: MotionCurves.feedback;
+    in property <length> lift: Motion.card-lift;
+    in property <length> press-depth: Motion.card-press;
+    out property <bool> hovered: interactive && observer.has-hover && !touch-pointer;
+    private property <bool> touch-pointer;
+    private property <string> previous-key;
+    private property <length> displacement;
+    private property <color> surface-color: white;
+    private property <BentoRect> bounds: {
+        x: self.absolute-position.x - origin-x,
+        y: self.absolute-position.y - origin-y + surface.y,
+        width: self.width, height: self.height
+    };
+    callback claim(string, BentoRect);
+    callback update-card(string, BentoRect);
+    callback leave(string);
+    callback forget(string);
+    accessible-role: groupbox;
+    accessible-label: card-key;
+    changed card-key => {
+        root.forget(root.previous-key);
+        root.previous-key = self.card-key;
+    }
+    changed bounds => { if root.hovered { root.update-card(root.card-key, root.bounds); } }
+    changed hovered => {
+        if self.hovered { root.claim(root.card-key, root.bounds); }
+        else { root.leave(root.card-key); }
+    }
+    observer := TouchArea {
+        width: root.width; height: root.height;
+        pointer-event(event) => {
+            if event.kind == PointerEventKind.cancel {
+                root.forget(root.card-key);
+            } else if event.kind == PointerEventKind.down || event.kind == PointerEventKind.move {
+                root.touch-pointer = event.touch-finger-id != 0;
+                if root.hovered { root.claim(root.card-key, root.bounds); }
+            } else if event.kind == PointerEventKind.up && root.touch-pointer {
+                root.forget(root.card-key);
+            }
+        }
+        surface := Rectangle {
+            width: root.width; height: root.height;
+            y: Motion.reduce ? 0px : root.displacement;
+            border-radius: Theme.panel-radius;
+            border-width: 1px; border-color: Theme.border;
+            background: root.surface-color;
+            @children
+        }
+    }
+    states [
+        pressed when root.interactive && observer.pressed: {
+            displacement: root.press-depth;
+            surface-color: Theme.green-soft;
+            in { animate displacement, surface-color { enabled: !Motion.reduce; duration: root.press-duration; easing: root.easing; } }
+            out { animate displacement, surface-color { enabled: !Motion.reduce; duration: root.hover-duration; easing: root.easing; } }
+        }
+        hovered when root.hovered: {
+            displacement: -root.lift;
+            surface-color: Theme.subtle;
+            in { animate displacement, surface-color { enabled: !Motion.reduce; duration: root.hover-duration; easing: root.easing; } }
+            out { animate displacement, surface-color { enabled: !Motion.reduce; duration: root.hover-duration; easing: root.easing; } }
+        }
+    ]
+}
+
+export component MotionReveal inherits Rectangle {
+    in property <bool> entered;
+    in property <duration> duration: Motion.reveal;
+    in property <easing> easing: MotionCurves.feedback;
+    in property <length> distance: Motion.reveal-distance;
+    private property <float> progress;
+    surface := Rectangle {
+        width: root.width; height: root.height;
+        y: Motion.reduce ? 0px : root.distance * (1 - root.progress);
+        opacity: Motion.reduce ? 1 : root.progress;
+        @children
+    }
+    states [
+        revealed when root.entered || Motion.reduce: {
+            progress: 1;
+            in { animate progress { enabled: !Motion.reduce; duration: root.duration; easing: root.easing; } }
+            out { animate progress { duration: 0ms; } }
+        }
+    ]
+}

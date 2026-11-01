@@ -126,6 +126,18 @@ component WindowSettings inherits VerticalLayout {
             notice-example := FeatureExample { kind: 1; x: parent.stacked ? 0px : controls.width + 24px; y: parent.stacked ? controls.height + 18px : 0px; width: parent.width - self.x; }
         }
     }
+    SettingCard {
+        title: "界面动效"; description: "控制页面切换、按钮和进度条动画。"; icon: @image-url("../resources/icons/ArrowsClockwise-regular.svg");
+        Rectangle {
+            height: 76px; background: Theme.subtle; border-radius: 10px;
+            HorizontalLayout {
+                padding: 16px; spacing: 16px;
+                VerticalLayout { spacing: 6px; Label { text: "减少界面动效"; font-size: 15px; font-weight: 600; } Muted { text: "关闭页面切换与状态过渡动画，立即完成变化。"; } }
+                Switch { checked <=> Preferences.reduce-motion; enabled: !Updates.dialog && !Preferences.busy; accessible-label: "减少界面动效"; toggled => { Preferences.edited(); } }
+            }
+        }
+        Message { text: "Windows 的“显示动画”关闭时，应用会自动进入减少动效模式，无需在这里重复设置。"; }
+    }
 }
 
 component FavoriteSettings inherits Rectangle {
@@ -136,13 +148,25 @@ component FavoriteSettings inherits Rectangle {
         x: 0px; y: 0px;
         width: root.stacked ? parent.width : (parent.width - 18px) * 0.6;
         height: self.preferred-height;
-        title: "自动检查"; description: "关注应用内收藏项目的新正式版。"; icon: @image-url("../resources/icons/Star-regular.svg");
+        title: "自动检查"; description: "关注应用内收藏项目的新版本。"; icon: @image-url("../resources/icons/Star-regular.svg");
         HorizontalLayout {
             spacing: 12px;
             Label { text: "自动检查收藏更新"; font-weight: 600; }
             Switch { checked <=> Preferences.auto-check; enabled: !Updates.dialog && !Preferences.busy; accessible-label: "自动检查收藏更新"; toggled => { Preferences.edited(); } }
         }
-        HorizontalLayout { Label { text: "检查间隔"; } Badge { width: 90px; text: "每 6 小时"; } }
+        HorizontalLayout { Label { text: "检查间隔"; } ComboBox { width: 132px; model: ["每 15 分钟", "每 1 小时", "每 6 小时", "每 24 小时"]; current-index <=> Preferences.interval; enabled: !Updates.dialog && !Preferences.busy && Preferences.auto-check; selected => { Preferences.edited(); } } }
+        HorizontalLayout { Label { text: "新版本提醒"; } Switch { checked <=> Preferences.notifications; enabled: !Updates.dialog && !Preferences.busy; toggled => { Preferences.edited(); } } }
+        HorizontalLayout { Label { text: "自动下载最新版"; } Switch { checked <=> Preferences.auto-download; enabled: !Updates.dialog && !Preferences.busy; toggled => { Preferences.edited(); } } }
+        HorizontalLayout { Label { text: "包含预发布版本"; } Switch { checked <=> Preferences.prerelease; enabled: !Updates.dialog && !Preferences.busy; toggled => { Preferences.edited(); } } }
+        HorizontalLayout { Label { text: "自动下载附件"; } ComboBox { width: 168px; model: ["优先安装包", "全部附件", "不下载附件"]; current-index <=> Preferences.asset-mode; enabled: !Updates.dialog && !Preferences.busy && Preferences.auto-download; selected => { Preferences.edited(); } } }
+        HorizontalLayout {
+            Label { text: "附件名通配（可空）"; }
+            Input {
+                text <=> Preferences.asset-pattern;
+                enabled: !Updates.dialog && !Preferences.busy && Preferences.auto-download && Preferences.asset-mode != 2;
+                edited => { Preferences.edited(); }
+            }
+        }
         HorizontalLayout { Label { text: "运行范围"; } Label { text: "在 GitHubSP 内收藏的项目"; horizontal-alignment: right; } }
         Message { text: "应用运行期间按间隔检查，退出后停止。首次成功检查建立版本基线。\n不会创建后台服务或开机自启，也不会同步 GitHub 账号的收藏列表。"; }
     }
@@ -151,7 +175,8 @@ component FavoriteSettings inherits Rectangle {
         width: parent.width - self.x; height: self.preferred-height;
         title: "更新提醒示意"; icon: @image-url("../resources/icons/Info-regular.svg");
         FeatureExample { kind: 2; }
-        Muted { text: "发现新正式版时，在应用内生成提醒。可查看详情后选择下载。"; wrap: word-wrap; }
+        Muted { text: "发现新版本时，导航显示角标；应用在后台时额外弹出置顶提醒窗，托盘菜单可直接查看。"; wrap: word-wrap; }
+        Muted { text: "自动下载只处理可识别的安装包附件；全部附件模式会把该版本的所有附件加入队列。"; wrap: word-wrap; font-size: 11px; }
     }
 }
 
@@ -177,6 +202,12 @@ component DataSettings inherits VerticalLayout {
     SettingCard {
         title: "数据管理反馈"; icon: @image-url("../resources/icons/ClockCounterClockwise-regular.svg");
         Message { text: Storage.message == "" ? "完成导出或迁移后，将在这里显示实际结果与保存位置。" : Storage.message; }
+    }
+    SettingCard {
+        title: "日志与诊断"; description: "本地日志用于定位下载与检查问题，不会上传。"; icon: @image-url("../resources/icons/File-regular.svg");
+        HorizontalLayout { Label { text: "记录本地日志"; font-weight: 600; } Switch { checked <=> Preferences.log; enabled: !Updates.dialog && !Preferences.busy; accessible-label: "记录本地日志"; toggled => { Preferences.edited(); } } }
+        Muted { text: "日志写入数据目录 logs，单文件 5 MB，超出后轮换为 githubsp.previous.log；不记录令牌或剪贴板内容。"; wrap: word-wrap; }
+        HorizontalLayout { alignment: start; ActionButton { text: "复制诊断信息"; icon: @image-url("../resources/icons/Files-regular.svg"); compact: true; enabled: !Updates.dialog; clicked => { Preferences.copy-diagnostics(); } } Muted { text: Preferences.diagnostic-message; } }
     }
 }
 
@@ -224,7 +255,7 @@ component UpdateSettings inherits VerticalLayout {
     vertical-stretch: 0; spacing: 18px;
     SettingCard {
         title: "GitHubSP"; description: "简单、稳定的 GitHub 资源下载工具"; icon: @image-url("../resources/icons/CloudArrowDown-fill.svg");
-        HorizontalLayout { Label { text: "当前版本"; font-weight: 600; horizontal-stretch: 0; } Badge { text: "v0.2.8"; } Rectangle { horizontal-stretch: 1; } if Updates.latest != "": Badge { text: Updates.latest; tone: 1; } }
+        HorizontalLayout { Label { text: "当前版本"; font-weight: 600; horizontal-stretch: 0; } Badge { text: "v0.3.0"; } Rectangle { horizontal-stretch: 1; } if Updates.latest != "": Badge { text: Updates.latest; tone: 1; } }
         Muted { text: "上次检查：" + Updates.checked; wrap: word-wrap; }
         Message { text: Updates.message; success: Updates.available; }
         HorizontalLayout {
@@ -249,12 +280,12 @@ component UpdateSettings inherits VerticalLayout {
     }
 }
 
-export component SettingsPage inherits HorizontalLayout {
+export component SettingsPage inherits VerticalLayout {
+    min-width: 0px;
     private property <int> section: Preferences.section;
     changed section => { settings-scroll.content-y = 0px; }
     spacing: self.width < 800px ? 10px : 16px;
     ModuleNavigation {
-        width: root.width < 800px ? 128px : 196px;
         title: "设置";
         items: ["下载设置", "窗口与提醒", "收藏检查", "数据管理", "软件更新与关于"];
         icons: [@image-url("../resources/icons/DownloadSimple-regular.svg"), @image-url("../resources/icons/Monitor-regular.svg"), @image-url("../resources/icons/Star-regular.svg"), @image-url("../resources/icons/Package-regular.svg"), @image-url("../resources/icons/Info-regular.svg")];
@@ -262,15 +293,16 @@ export component SettingsPage inherits HorizontalLayout {
         select(index) => { Workspace.select-settings-section(index); }
     }
     Panel {
-        horizontal-stretch: 1;
-        background: #f8fbff;
+        vertical-stretch: 1;
+        background: white;
+        border-width: 0px;
         VerticalLayout {
-            padding: root.width < 800px ? 12px : 24px; spacing: 14px;
+            padding: 0px; spacing: 14px;
             VerticalLayout {
                 spacing: 6px;
                 Label {
                 text: Preferences.section == 0 ? "下载设置" : Preferences.section == 1 ? "窗口与提醒" : Preferences.section == 2 ? "收藏检查" : Preferences.section == 3 ? "数据管理" : "软件更新与关于";
-                font-size: root.width < 800px ? 22px : 26px; font-weight: 650;
+                font-size: 24px; font-weight: 650;
                 }
                 Muted { text: Preferences.section == 0 ? "调整下载带宽，让任务适合当前网络。" : Preferences.section == 1 ? "设置窗口行为与后台提醒方式。" : Preferences.section == 2 ? "及时获知应用内收藏项目的新版本。" : Preferences.section == 3 ? "管理本地应用记录，导出备份。" : "了解当前版本，获取更新与开源信息。"; }
             }
@@ -292,7 +324,7 @@ export component SettingsPage inherits HorizontalLayout {
                 height: root.width < 800px ? 30px : 24px;
                 content-width: self.visible-width;
                 VerticalLayout {
-                    Label { text: Preferences.message == "" ? "各模块修改统一保存后生效。" : Preferences.message; color: Preferences.saved ? Theme.green-hover : Theme.muted; wrap: word-wrap; }
+                    Label { text: Preferences.message == "" ? "各模块修改统一保存后生效。" : Preferences.message; color: Preferences.saved ? Theme.green-hover : Preferences.message == "" ? Theme.muted : Theme.red; wrap: word-wrap; }
                 }
             }
             HorizontalLayout {
@@ -337,7 +369,7 @@ export component UpdateDialog inherits FocusScope {
         x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2;
         VerticalLayout {
             padding: 24px; spacing: 16px;
-            Heading { title: "下载新版"; description: "选择版本并下载更新程序 · 当前 v0.2.8"; icon: @image-url("../resources/icons/DownloadSimple-regular.svg"); page: true; }
+            Heading { title: "下载新版"; description: "选择版本并下载更新程序 · 当前 v0.3.0"; icon: @image-url("../resources/icons/DownloadSimple-regular.svg"); page: true; }
             Rectangle { height: 1px; background: Theme.border; }
             ScrollView {
                 content-width: self.visible-width;

@@ -1,15 +1,19 @@
+import { Motion } from "motion.slint";
+
 export global Theme {
-    out property <color> text: #152541;
-    out property <color> muted: #647794;
-    out property <color> border: #e0eaf4;
-    out property <color> strong-border: #cbd8e7;
-    out property <color> green: #069c58;
-    out property <color> green-hover: #07814b;
+    out property <color> text: #202523;
+    out property <color> muted: #626d67;
+    out property <color> border: #e6eae7;
+    out property <color> strong-border: #cbd3ce;
+    out property <color> green: #07814b;
+    out property <color> green-hover: #08683e;
     out property <color> green-soft: #e8f8f0;
-    out property <color> blue-soft: #eef6ff;
-    out property <color> canvas: #eaf3fc;
-    out property <color> subtle: #f5f8fc;
-    out property <color> red: #e14860;
+    out property <color> blue-soft: #f1f5f3;
+    out property <color> canvas: #f7f8f8;
+    out property <color> subtle: #f3f5f4;
+    out property <color> red: #bd314b;
+    out property <length> panel-radius: 12px;
+    out property <length> card-gap: 12px;
 }
 
 export component Label inherits Text {
@@ -47,6 +51,10 @@ export component ActionButton inherits Rectangle {
     in property <image> icon;
     in property <length> icon-size: 18px;
     in property <bool> show-icon: true;
+    // 图标微动效：悬停轻抬、按下回弹；减少动效模式下时长归零，图标完全静止。
+    in property <bool> icon-motion: true;
+    // 文字强调色：调用方（如顶栏标签）用它做选中变绿，未设置时保持正文色。
+    in property <color> accent-text: Theme.text;
     in property <bool> leading;
     in property <length> font-size: compact ? 12px : 13px;
     in property <int> weight: 500;
@@ -57,30 +65,61 @@ export component ActionButton inherits Rectangle {
     in property <bool> compact;
     in property <bool> enabled: true;
     out property <bool> has-focus: focus.has-focus;
+    // 图标旋转角度：悬停 4°，按下 -7°（“点头”反馈），长度/角度是 Slint 可动画类型。
+    property <angle> icon-angle: root.icon-motion ? (touch.pressed ? -7deg : touch.has-hover ? 4deg : 0deg) : 0deg;
+    animate icon-angle { duration: Motion.press; easing: ease-out; }
+    // 按下涟漪进度 0 → 1：半径与透明度都由它推导，只需一条动画。
+    property <float> ripple-progress: 0.0;
     callback clicked;
     forward-focus: focus;
     accessible-role: button;
     accessible-label: help;
     accessible-enabled: enabled && !pending;
     accessible-action-default => { if root.enabled && !root.pending { root.clicked(); } }
-    min-height: collapsed ? 0px : compact ? 32px : 40px;
-    max-height: collapsed ? 0px : compact ? 32px : 40px;
+    min-height: collapsed ? 0px : compact ? 32px : 36px;
+    max-height: collapsed ? 0px : compact ? 32px : 36px;
     min-width: collapsed ? 0px : layout.min-width;
     max-width: collapsed ? 0px : 100000px;
     horizontal-stretch: 0;
     vertical-stretch: 0;
     border-radius: 8px;
+    clip: true;
     opacity: enabled ? 1 : 0.48;
+    animate opacity { duration: Motion.fast; easing: ease-out; }
     border-width: flat ? 0 : 1px;
     border-color: focus.has-focus ? Theme.green : primary ? Theme.green : danger ? #f7d4db : Theme.border;
-    background: primary ? (touch.has-hover ? Theme.green-hover : Theme.green) : danger ? #fff0f3 : soft ? Theme.green-soft : touch.has-hover ? Theme.subtle : flat ? transparent : white;
+    animate border-color { duration: Motion.fast; easing: ease-out; }
+    background: primary ? (touch.pressed ? #056b3f : touch.has-hover ? Theme.green-hover : Theme.green) : danger ? (touch.pressed ? #ffe1e7 : #fff0f3) : soft ? (touch.pressed ? #d9f3e6 : Theme.green-soft) : touch.pressed ? #e7ece9 : touch.has-hover ? Theme.subtle : flat ? transparent : white;
+    animate background { duration: Motion.fast; easing: ease-out; }
+    // 按下涟漪：圆心在按钮中心，半径扩散到覆盖整个按钮；透明度随进度衰减，松手立即归零。
+    Rectangle {
+        x: (root.width - self.width) / 2;
+        y: (root.height - self.height) / 2;
+        width: root.ripple-progress * (root.width + root.height);
+        height: self.width;
+        border-radius: self.width / 2;
+        background: root.primary ? white : root.danger ? Theme.red : Theme.green;
+        opacity: (1.0 - root.ripple-progress) * 0.16;
+    }
+    states [
+        pressed when touch.pressed: {
+            ripple-progress: 1.0;
+            in { animate ripple-progress { duration: Motion.ripple; easing: ease-out; } }
+            out { animate ripple-progress { duration: 0ms; } }
+        }
+    ]
     layout := HorizontalLayout {
         padding-left: root.compact ? 8px : 14px;
         padding-right: root.compact ? 8px : 14px;
         spacing: root.text == "" ? 0px : 8px;
         alignment: root.leading ? start : center;
-        if root.show-icon && root.icon.width > 0: Icon { source: root.icon; tint: root.primary ? white : root.danger ? Theme.red : root.soft ? Theme.green-hover : Theme.text; width: root.icon-size; preferred-height: root.icon-size; }
-        if root.text != "": Label { text: root.text; font-size: root.font-size; font-weight: root.weight; color: root.primary ? white : root.danger ? Theme.red : root.soft ? Theme.green-hover : Theme.text; }
+        if root.show-icon && root.icon.width > 0: Rectangle {
+            width: root.icon-size;
+            preferred-height: root.icon-size;
+            transform-rotation: root.icon-angle;
+            Icon { source: root.icon; tint: root.primary ? white : root.danger ? Theme.red : root.soft ? Theme.green-hover : root.accent-text; animate tint { duration: Motion.fast; easing: ease-out; } width: root.icon-size; preferred-height: root.icon-size; }
+        }
+        if root.text != "": Label { text: root.text; font-size: root.font-size; font-weight: root.weight; color: root.primary ? white : root.danger ? Theme.red : root.soft ? Theme.green-hover : root.accent-text; animate color { duration: Motion.fast; easing: ease-out; } }
     }
     focus := FocusScope {
         enabled: root.enabled && !root.pending;
@@ -102,18 +141,20 @@ export component Input inherits Rectangle {
     callback edited(string);
     callback accepted;
     forward-focus: input;
-    min-height: 42px;
+    min-height: 36px;
     min-width: 80px;
     border-radius: 8px;
     border-width: 1px;
     border-color: input.has-focus ? Theme.green : Theme.strong-border;
+    animate border-color { duration: Motion.fast; easing: ease-out; }
     background: enabled ? white : Theme.subtle;
+    animate background { duration: Motion.fast; }
     HorizontalLayout {
         padding-left: 12px; padding-right: 12px; spacing: 10px;
         if root.icon.width > 0: Icon { source: root.icon; }
         Rectangle {
             horizontal-stretch: 1;
-            if root.text == "": Text { width: parent.width; text: root.placeholder; color: #8b9bb4; font-size: 13px; vertical-alignment: center; horizontal-alignment: left; overflow: elide; }
+            if root.text == "": Text { width: parent.width; text: root.placeholder; color: Theme.muted; font-size: 13px; vertical-alignment: center; horizontal-alignment: left; overflow: elide; }
             input := TextInput {
                 text <=> root.text;
                 enabled: root.enabled && !root.pending;
@@ -132,7 +173,7 @@ export component Input inherits Rectangle {
 
 export component Panel inherits Rectangle {
     background: white;
-    border-radius: 12px;
+    border-radius: Theme.panel-radius;
     border-width: 1px;
     border-color: Theme.border;
 }
@@ -146,15 +187,10 @@ export component Heading inherits Rectangle {
     height: page ? 55px : 44px;
     HorizontalLayout {
         spacing: 12px;
-        Rectangle {
-            width: root.page ? 48px : 38px; height: self.width;
-            border-radius: 12px;
-            background: Theme.green;
-            Icon { source: root.icon; tint: white; width: root.page ? 29px : 23px; preferred-height: self.width; x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2; }
-        }
+        if !root.page && root.icon.width > 0: Icon { source: root.icon; tint: Theme.muted; width: 20px; preferred-height: 20px; }
         if !root.inline-description: VerticalLayout {
             spacing: 3px;
-            Label { text: root.title; font-size: root.page ? 22px : 18px; font-weight: 650; }
+            Label { text: root.title; font-size: root.page ? 24px : 16px; font-weight: 650; }
             if root.description != "": Muted { text: root.description; font-size: 12px; }
         }
         if root.inline-description: HorizontalLayout {
@@ -173,7 +209,7 @@ export component Message inherits Rectangle {
     min-height: body.preferred-height + 22px;
     border-radius: 8px;
     background: error ? #fff0f3 : success ? Theme.green-soft : Theme.blue-soft;
-    body := Text { x: 13px; y: 11px; width: parent.width - 26px; text: root.text; color: root.error ? #bd314b : root.success ? #087747 : #4e6a91; wrap: word-wrap; font-size: 12px; }
+    body := Text { x: 13px; y: 11px; width: parent.width - 26px; text: root.text; color: root.error ? Theme.red : root.success ? #087747 : Theme.muted; wrap: word-wrap; font-size: 12px; }
 }
 
 export component EmptyState inherits Rectangle {
@@ -192,13 +228,14 @@ export component EmptyState inherits Rectangle {
 export component Badge inherits Rectangle {
     in property <string> text;
     in property <int> tone;
+    horizontal-stretch: 0;
     preferred-height: 25px;
     min-height: 25px;
     min-width: label.preferred-width + 16px;
     Rectangle {
         y: (parent.height - self.height) / 2; height: 25px; border-radius: 6px;
         background: root.tone == 1 ? Theme.green-soft : root.tone == 2 ? #fff0f3 : root.tone == 3 ? #fff7e6 : root.tone == 4 ? Theme.blue-soft : root.tone == 5 ? #f3edff : #f0f4f9;
-        label := Label { text: root.text; x: 8px; width: parent.width - 16px; height: parent.height; color: root.tone == 1 ? #00834a : root.tone == 2 ? #cb324d : root.tone == 3 ? #b87400 : root.tone == 4 ? #197de5 : root.tone == 5 ? #8056ba : #657594; font-size: 11px; }
+        label := Label { text: root.text; x: 8px; width: parent.width - 16px; height: parent.height; color: root.tone == 1 ? #00834a : root.tone == 2 ? #cb324d : root.tone == 3 ? #855600 : root.tone == 4 ? #245f99 : root.tone == 5 ? #6b479c : #56625b; font-size: 11px; }
     }
 }
 
@@ -208,13 +245,12 @@ export component Stat inherits Panel {
     in property <image> icon;
     in property <int> tone;
     in property <bool> compact;
-    background: tone == 1 ? #eefaf4 : tone == 2 ? #fff7f9 : tone == 3 ? #fff8ef : tone == 5 ? #f5f0ff : #edf6ff;
-    border-color: tone == 1 ? #d7f0e4 : tone == 2 ? #f7dce4 : tone == 3 ? #ffead5 : tone == 5 ? #e8dffc : #d9e9fc;
-    height: compact ? 60px : 82px;
+    background: white;
+    border-width: 0px;
+    height: compact ? 52px : 60px;
     HorizontalLayout {
-        padding: root.compact ? 8px : 16px; spacing: 12px;
-        if !root.compact: Icon { source: root.icon; tint: root.tone == 1 ? Theme.green : root.tone == 2 ? Theme.red : root.tone == 3 ? #d58a26 : root.tone == 5 ? #8860c4 : #3787d8; width: 28px; preferred-height: 28px; }
-        VerticalLayout { spacing: 2px; Muted { text: root.title; font-size: root.compact ? 11px : 12px; } Label { text: root.value; font-size: root.compact ? 21px : 25px; font-weight: 650; } }
+        padding: root.compact ? 8px : 12px; spacing: 8px;
+        VerticalLayout { spacing: 2px; Muted { text: root.title; font-size: 11px; } Label { text: root.value; color: root.tone == 1 ? Theme.green-hover : root.tone == 2 ? Theme.red : root.tone == 3 || root.tone == 5 ? #986000 : Theme.text; font-size: 20px; font-weight: 650; } }
     }
 }
 
@@ -227,7 +263,7 @@ export component SettingCard inherits Panel {
     preferred-width: 400px;
     min-height: content.preferred-height;
     content := VerticalLayout {
-        padding: 20px; spacing: 20px;
+        padding: 20px; spacing: 16px;
         Heading { title: root.title; description: root.description; icon: root.icon; }
         @children
     }
@@ -239,8 +275,10 @@ export component Switch inherits Rectangle {
     callback toggled;
     width: 44px; height: 25px;
     border-radius: 16px;
-    background: checked ? Theme.green : #c6d1e0;
+    background: checked ? Theme.green : #c4cdc7;
+    animate background { duration: Motion.fast; easing: ease-out; }
     opacity: enabled ? 1 : 0.5;
+    animate opacity { duration: Motion.fast; easing: ease-out; }
     border-width: focus.has-focus ? 2px : 0px;
     border-color: #7183a1;
     forward-focus: focus;
@@ -249,7 +287,7 @@ export component Switch inherits Rectangle {
     accessible-checked: checked;
     accessible-enabled: enabled;
     accessible-action-default => { if root.enabled { root.checked = !root.checked; root.toggled(); } }
-    Rectangle { x: root.checked ? 22px : 3px; y: 3px; width: 19px; height: 19px; border-radius: 10px; background: white; }
+    Rectangle { x: root.checked ? 22px : 3px; y: 3px; width: 19px; height: 19px; border-radius: 10px; background: white; animate x { duration: Motion.fast; easing: cubic-bezier(0.2, 0, 0, 1); } }
     focus := FocusScope { enabled: root.enabled; key-pressed(event) => { if event.text == " " { root.checked = !root.checked; root.toggled(); return accept; } return reject; } }
     TouchArea { enabled: root.enabled; mouse-cursor: pointer; clicked => { focus.focus(); root.checked = !root.checked; root.toggled(); } }
 }
@@ -313,7 +351,7 @@ export component CheckBox inherits Rectangle {
     accessible-action-default => { if root.enabled && !root.pending { root.checked = !root.checked; root.toggled(); } }
     content := HorizontalLayout {
         spacing: root.text == "" ? 0px : 5px;
-        Rectangle { width: 17px; height: 17px; y: (parent.height - self.height) / 2; border-radius: 3px; border-width: focus.has-focus ? 2px : 1px; border-color: root.checked ? Theme.green : Theme.strong-border; background: root.checked ? Theme.green : white; Label { text: root.checked ? "✓" : ""; color: white; font-size: 13px; horizontal-alignment: center; } }
+        Rectangle { width: 17px; height: 17px; y: (parent.height - self.height) / 2; border-radius: 3px; border-width: focus.has-focus ? 2px : 1px; border-color: root.checked ? Theme.green : Theme.strong-border; background: root.checked ? Theme.green : white; animate background { duration: Motion.fast; } animate border-color { duration: Motion.fast; } Label { text: root.checked ? "✓" : ""; color: white; font-size: 13px; horizontal-alignment: center; } }
         if root.text != "": Label { text: root.text; font-size: 11px; }
     }
     focus := FocusScope { enabled: root.enabled && !root.pending; key-pressed(event) => { if event.text == " " { root.checked = !root.checked; root.toggled(); return accept; } return reject; } }

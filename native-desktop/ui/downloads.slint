@@ -1,7 +1,9 @@
 import { ListView, ScrollView, ComboBox, TextEdit } from "std-widgets.slint";
 import { Theme, Panel, ActionButton, Input, Label, Muted, Icon, EmptyState, Message, Badge, CheckBox, Stat } from "theme.slint";
 import { ModuleNavigation } from "module-navigation.slint";
-import { Workspace, Sources, TaskRow, Updates } from "state.slint";
+import { Workspace, Sources, TaskRow, Updates, NoteBlock } from "state.slint";
+import { NotesView } from "settings.slint";
+import { Motion } from "motion.slint";
 
 component ReleaseList inherits Panel {
     VerticalLayout {
@@ -23,7 +25,8 @@ component ReleaseList inherits Panel {
         if Sources.releases.length > 0: ListView {
             for release in Sources.releases: Rectangle {
                 height: 44px;
-                background: release.id == Sources.selected-release ? Theme.green-soft : release-touch.has-hover ? Theme.subtle : transparent;
+                background: release.id == Sources.selected-release ? Theme.green-soft : release-touch.pressed ? #e9eff7 : release-touch.has-hover ? Theme.subtle : transparent;
+                animate background { duration: Motion.fast; easing: ease-out; }
                 HorizontalLayout {
                     padding: 10px; spacing: 9px;
                     Icon { source: @image-url("../resources/icons/Package-regular.svg"); tint: release.id == Sources.selected-release ? Theme.green : Theme.muted; }
@@ -56,6 +59,16 @@ component AssetList inherits Panel {
             }
         }
         Rectangle {
+            height: 34px; background: Theme.subtle;
+            HorizontalLayout {
+                padding-left: 12px; padding-right: 10px; spacing: 8px;
+                ComboBox { width: 140px; model: ["全部平台", "Windows", "macOS", "Linux"]; current-index <=> Sources.platform-filter; enabled: !Updates.dialog && !Sources.busy; selected => { Sources.platform-changed(); } }
+                ActionButton { text: "自动匹配"; icon: @image-url("../resources/icons/SquaresFour-regular.svg"); compact: true; flat: true; enabled: !Updates.dialog && !Sources.busy && Sources.assets.length > 0; clicked => { Sources.auto-match-now(); } }
+                Rectangle { horizontal-stretch: 1; }
+                ActionButton { text: Sources.selected-count > 0 ? "清空选择" : "全选"; compact: true; flat: true; enabled: !Updates.dialog && !Sources.busy && Sources.assets.length > 0; clicked => { Sources.select-all(Sources.selected-count == 0); } }
+            }
+        }
+        Rectangle {
             background: Theme.subtle; height: 33px;
             HorizontalLayout { padding-left: 12px; padding-right: 12px; spacing: 10px; Label { text: "选择"; width: 24px; } Label { text: "附件文件名"; } Label { text: "大小"; width: 70px; horizontal-alignment: right; } }
         }
@@ -74,11 +87,25 @@ component AssetList inherits Panel {
                 }
             }
         }
+        if Sources.notes.length > 0: Rectangle {
+            height: Sources.notes-visible ? 148px : 34px;
+            background: Theme.blue-soft;
+            VerticalLayout {
+                spacing: 0px;
+                Rectangle {
+                    height: 34px;
+                    HorizontalLayout { padding-left: 12px; padding-right: 10px; spacing: 8px; Icon { source: @image-url("../resources/icons/File-regular.svg"); width: 16px; tint: Theme.muted; } Label { text: "版本更新说明"; font-weight: 600; font-size: 11px; } Rectangle { horizontal-stretch: 1; } ActionButton { text: Sources.notes-visible ? "收起" : "展开"; compact: true; flat: true; clicked => { Sources.toggle-notes(); } } }
+                }
+                if Sources.notes-visible: NotesView { blocks: Sources.notes; height: 112px; }
+            }
+        }
     }
 }
 
 component SourceBrowser inherits VerticalLayout {
     in property <length> list-height: 250px;
+    private property <bool> stacked: self.width < 660px;
+    min-height: self.stacked ? 478px : max(232px, root.list-height);
     spacing: 10px;
     HorizontalLayout {
         height: 42px; spacing: 8px;
@@ -174,7 +201,7 @@ component PreviewSettings inherits Rectangle {
         Label { text: "保存目录"; font-weight: 600; }
         Rectangle {
             height: directory-text.preferred-height + 18px;
-            background: #f6fbff; border-radius: 6px; border-width: 1px; border-color: Theme.border;
+            background: Theme.canvas; border-radius: 6px; border-width: 1px; border-color: Theme.border;
             directory-text := Label { x: 9px; y: 9px; width: parent.width - 18px; text: Sources.preview-directory; wrap: word-wrap; }
         }
         Rectangle { height: 1px; background: Theme.border; }
@@ -428,8 +455,8 @@ component ProgressCell inherits Rectangle {
         spacing: 8px;
         Rectangle {
             y: (parent.height - self.height) / 2; height: 6px;
-            border-radius: 3px; background: #dfe7ef;
-            Rectangle { x: 0px; height: parent.height; width: parent.width * root.progress; border-radius: 3px; background: #16b36a; }
+            border-radius: 3px; background: Theme.border;
+            Rectangle { x: 0px; height: parent.height; width: parent.width * root.progress; border-radius: 3px; background: Theme.green; animate width { duration: Motion.fast; easing: linear; } }
         }
         Muted { text: root.percent; font-size: 11px; width: 36px; }
     }
@@ -489,14 +516,19 @@ component DownloadRow inherits Rectangle {
     row-content := VerticalLayout {
         spacing: 0px;
         if !root.compact: HorizontalLayout {
-            height: 46px; padding-left: 12px; padding-right: 12px; spacing: 8px;
+            height: 64px; padding-left: 10px; padding-right: 10px; spacing: 8px;
             number-label := Muted { text: root.number; width: 36px; }
-            Label { text: root.task.filename; horizontal-stretch: 1; min-width: 90px; }
-            Muted { text: root.task.size; width: 65px; }
-            ProgressCell { progress: root.task.progress; percent: root.task.percent; width: 120px; }
-            Muted { text: root.task.speed; width: 105px; }
-            Muted { text: root.task.eta; width: 76px; }
-            Muted { text: root.task.route; width: 75px; }
+            VerticalLayout {
+                horizontal-stretch: 1; min-width: 130px; spacing: 4px; alignment: center;
+                Label { text: root.task.filename; font-weight: 600; }
+                Muted { text: root.task.repository == "" ? "GitHub Release 附件" : root.task.repository; font-size: 11px; }
+            }
+            VerticalLayout {
+                width: 136px; spacing: 5px; alignment: center;
+                ProgressCell { progress: root.task.progress; percent: root.task.percent; height: 12px; }
+                Muted { text: root.task.downloaded; font-size: 11px; }
+            }
+            Muted { text: root.task.speed; width: 86px; font-size: 11px; }
             Badge { text: root.task.state; tone: root.task.tone; width: 94px; }
             TaskActions { task: root.task; }
         }
@@ -504,6 +536,7 @@ component DownloadRow inherits Rectangle {
             padding: 8px; spacing: 4px;
             HorizontalLayout {
                 height: 34px; spacing: 8px;
+                Muted { text: root.number; width: 24px; }
                 Label { text: root.task.filename; horizontal-stretch: 1; font-weight: 600; }
                 Badge { text: root.task.state; tone: root.task.tone; width: 94px; }
                 TaskActions { task: root.task; }
@@ -531,7 +564,7 @@ component DownloadRow inherits Rectangle {
             }
         }
         if root.expanded: Rectangle {
-            background: #f2f7fd;
+            background: Theme.subtle;
             height: details.preferred-height;
             details := VerticalLayout {
                 padding: 16px; spacing: 14px;
@@ -566,21 +599,31 @@ component DownloadRow inherits Rectangle {
 }
 
 component QueuePanel inherits Panel {
-    property <bool> compact: self.width < 1000px;
+    property <bool> compact: self.width < 760px;
+    border-width: 0px;
     VerticalLayout {
-        padding: root.compact ? 12px : 16px; spacing: 10px;
+        padding: 0px; spacing: 12px;
         HorizontalLayout {
-            Label { text: "下载队列"; font-size: root.width < 600px ? 20px : 24px; font-weight: 650; }
-            ActionButton { enabled: !Updates.dialog; text: "新建下载"; compact: true; primary: true; icon: @image-url("../resources/icons/Plus-regular.svg"); clicked => { Workspace.select-download-section(1); } }
+            VerticalLayout {
+                spacing: 4px;
+                Label { text: "下载队列"; font-size: 24px; font-weight: 650; }
+                if root.height > 400px: Muted { text: "查看下载进度，管理等待任务"; }
+            }
+            ActionButton { enabled: !Updates.dialog; text: "新建下载"; primary: true; icon: @image-url("../resources/icons/Plus-regular.svg"); clicked => { Workspace.select-download-section(1); } }
         }
-        HorizontalLayout {
-            spacing: 8px;
-            Stat { title: "任务总数"; value: Workspace.total-tasks; compact: root.height < 500px; icon: @image-url("../resources/icons/Files-regular.svg"); }
-            Stat { title: "执行中"; value: Workspace.running-tasks; compact: root.height < 500px; tone: 1; icon: @image-url("../resources/icons/ArrowsClockwise-regular.svg"); }
-            Stat { title: "排队中"; value: Workspace.queued-tasks; compact: root.height < 500px; tone: 3; icon: @image-url("../resources/icons/ClockCounterClockwise-regular.svg"); }
-            Stat { title: "等待线路恢复"; value: Workspace.recovering-tasks; compact: root.height < 500px; tone: 5; icon: @image-url("../resources/icons/CloudArrowDown-regular.svg"); }
+        Panel {
+            height: 62px;
+            HorizontalLayout {
+                spacing: 0px;
+                Stat { title: "任务总数"; value: Workspace.total-tasks; }
+                Rectangle { width: 1px; background: Theme.border; }
+                Stat { title: "执行中"; value: Workspace.running-tasks; tone: 1; }
+                Rectangle { width: 1px; background: Theme.border; }
+                Stat { title: "排队中"; value: Workspace.queued-tasks; }
+                Rectangle { width: 1px; background: Theme.border; }
+                Stat { title: "等待线路恢复"; value: Workspace.recovering-tasks; tone: 3; }
+            }
         }
-        Muted { text: "仅保留最近 50 条结束记录，完整记录见历史。"; font-size: 11px; }
         if Workspace.queue-message != "": HorizontalLayout {
             spacing: 8px;
             Message { text: Workspace.queue-message; success: true; }
@@ -588,15 +631,20 @@ component QueuePanel inherits Panel {
         }
         HorizontalLayout {
             spacing: 8px; alignment: start;
-            ActionButton { text: "全部继续"; icon: @image-url("../resources/icons/Play-fill.svg"); primary: true; compact: true; enabled: !Updates.dialog && (!Workspace.busy && Workspace.can-resume); clicked => { Workspace.batch("resume"); } }
+            ActionButton { text: "全部继续"; icon: @image-url("../resources/icons/Play-fill.svg"); compact: true; enabled: !Updates.dialog && (!Workspace.busy && Workspace.can-resume); clicked => { Workspace.batch("resume"); } }
             ActionButton { text: "全部暂停"; icon: @image-url("../resources/icons/Pause-fill.svg"); compact: true; enabled: !Updates.dialog && (!Workspace.busy && Workspace.can-pause); clicked => { Workspace.batch("pause"); } }
-            ActionButton { text: "清空已完成"; icon: @image-url("../resources/icons/X-regular.svg"); compact: true; enabled: !Updates.dialog && (!Workspace.busy && Workspace.can-clear); clicked => { Workspace.batch("remove"); } }
+            ActionButton { text: "清空已完成"; icon: @image-url("../resources/icons/Trash-regular.svg"); flat: true; compact: true; enabled: !Updates.dialog && (!Workspace.busy && Workspace.can-clear); clicked => { Workspace.batch("remove"); } }
         }
         if !root.compact: Rectangle {
-            height: 36px; background: Theme.subtle;
+            height: 32px; background: Theme.subtle;
             HorizontalLayout {
-                padding-left: 12px; padding-right: 12px; spacing: 8px;
-                number-header := Label { text: "序号"; width: 36px; } Label { text: "文件名"; min-width: 90px; horizontal-stretch: 1; } Label { text: "大小"; width: 65px; } Label { text: "进度"; width: 120px; } Label { text: "速度"; width: 105px; } Label { text: "剩余时间"; width: 76px; } Label { text: "线路"; width: 75px; } Label { text: "状态"; width: 94px; } Label { text: "操作"; width: 108px; horizontal-alignment: right; }
+                padding-left: 10px; padding-right: 10px; spacing: 8px;
+                number-header := Muted { text: "序号"; width: 36px; }
+                Muted { text: "文件名"; min-width: 130px; horizontal-stretch: 1; }
+                Muted { text: "进度"; width: 136px; }
+                Muted { text: "速度"; width: 86px; }
+                Muted { text: "状态"; width: 94px; }
+                Muted { text: "操作"; width: 108px; horizontal-alignment: right; }
             }
         }
         if Workspace.tasks.length == 0: VerticalLayout {
@@ -604,24 +652,24 @@ component QueuePanel inherits Panel {
             EmptyState { min-height: 100px; title: "准备好你的第一个下载"; description: "点击新建下载，粘贴链接并选择保存目录。"; icon: @image-url("../resources/icons/CloudArrowDown-regular.svg"); }
         }
         if Workspace.tasks.length > 0: queue-list := ListView {
-            vertical-stretch: 1;
+            vertical-stretch: 1; min-height: 120px;
             for task[index] in Workspace.tasks: DownloadRow { task: task; number: index + 1; compact: root.compact; }
         }
+        Muted { text: "仅保留最近 50 条结束记录，完整记录见历史。"; font-size: 11px; height: 18px; }
     }
 }
 
-export component DownloadsPage inherits HorizontalLayout {
-    spacing: self.width < 800px ? 10px : 16px;
-    ModuleNavigation {
-        width: root.width < 800px ? 128px : root.width < 1200px ? 164px : 188px;
-        title: "下载";
-        items: ["下载队列", "新建下载", "线路检测"];
-        icons: [@image-url("../resources/icons/ListBullets-regular.svg"), @image-url("../resources/icons/Plus-regular.svg"), @image-url("../resources/icons/ArrowsClockwise-regular.svg")];
+export component DownloadsPage inherits VerticalLayout {
+    min-width: 0px;
+    in property <bool> show-navigation;
+    spacing: 12px;
+    if root.show-navigation: ModuleNavigation {
+        title: "下载"; items: ["下载队列", "新建下载", "线路检测"];
         selected: Workspace.download-section;
         select(index) => { Workspace.select-download-section(index); }
     }
     Rectangle {
-        horizontal-stretch: 1;
+        vertical-stretch: 1;
         if Workspace.download-section == 0: QueuePanel { width: parent.width; height: parent.height; }
         if Workspace.download-section == 1: NewDownloadPanel { width: parent.width; height: parent.height; }
         if Workspace.download-section == 2: RoutePanel { width: parent.width; height: parent.height; }

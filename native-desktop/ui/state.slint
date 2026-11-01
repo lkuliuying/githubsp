@@ -12,7 +12,8 @@ export struct ReleaseRow { id: string, tag: string, detail: string }
 export struct AssetRow { url: string, name: string, size: string, detail: string, unavailable: bool, selected: bool }
 export struct PreviewRow { name: string, size: string, state: string, detail: string, task-id: string, tone: int }
 export struct HistoryRow { id: string, number: string, name: string, state: string, repository: string, tag: string, date: string, completed: string, path: string, file-state: string, tone: int, removable: bool }
-export struct FavoriteRow { repository: string, tag: string, state: string, tone: int, color-index: int, checked: string, error: string }
+export struct FavoriteRow { repository: string, tag: string, state: string, tone: int, color-index: int, checked: string, error: string, unread: bool, published: string, summary: string, downloadable: bool }
+export struct UpdateNoticeRow { repository: string, tag: string, published: string, summary: string, release-id: string }
 export struct NoteTableRow { cells: [string], header: bool }
 export struct NoteBlock { content: styled-text, plain: string, kind: int, level: int, table: [NoteTableRow] }
 
@@ -33,6 +34,12 @@ export global Workspace {
     in property <string> queued-tasks;
     in property <string> recovering-tasks;
     in property <string> notices;
+    in property <int> unread-updates;
+    in property <bool> checking;
+    in property <string> checking-text;
+    in property <float> checking-progress;
+    in property <string> api-status;
+    in property <bool> api-warning;
     in property <[TaskRow]> tasks;
     in property <[RouteRow]> routes;
     in property <string> route-target;
@@ -57,6 +64,7 @@ export global Workspace {
     callback batch(string);
     callback diagnose();
     callback acknowledge();
+    callback dismiss-watch-updates();
     callback hide();
     callback about();
 }
@@ -89,9 +97,17 @@ export global Sources {
     in property <[PreviewRow]> preview;
     in property <bool> can-submit;
     in-out property <int> route;
+    in-out property <int> platform-filter;
+    in-out property <bool> auto-match;
+    in property <[NoteBlock]> notes;
+    in property <bool> notes-visible;
     callback browse(int);
     callback select-release(string);
     callback select-asset(string, bool);
+    callback select-all(bool);
+    callback auto-match-now();
+    callback platform-changed();
+    callback toggle-notes();
     callback edited();
     callback preview-batch(bool);
     callback submit();
@@ -130,10 +146,24 @@ export global Favorites {
     in property <int> successful;
     in property <int> failed;
     in property <int> pending;
+    in property <int> updates;
     in property <string> checked: "尚未检查";
+    in property <bool> checking;
+    in property <string> checking-text;
+    in property <float> checking-progress;
+    in property <bool> auto-download;
+    in-out property <string> rule-repository;
+    in-out property <bool> rule-prerelease;
+    in-out property <bool> rule-auto;
+    in-out property <string> rule-pattern;
     callback add();
     callback filter-changed();
     callback action(string, string);
+    callback download(string);
+    callback cancel-check();
+    callback edit-rule(string);
+    callback save-rule();
+    callback cancel-rule();
 }
 
 export global Preferences {
@@ -144,14 +174,25 @@ export global Preferences {
     in-out property <bool> close-to-tray;
     in-out property <bool> completion: true;
     in-out property <bool> auto-check;
+    in-out property <int> interval;
+    in-out property <bool> notifications;
+    in-out property <bool> auto-download;
+    in-out property <bool> prerelease;
+    in-out property <int> asset-mode;
+    in-out property <string> asset-pattern;
+    in-out property <bool> auto-platform;
+    in-out property <bool> log;
+    in-out property <bool> reduce-motion;
     in property <bool> busy;
     in property <string> message;
+    in property <string> diagnostic-message;
     in property <bool> saved;
     callback edited();
     callback slider-edited(float);
     callback toggle-limit();
     callback reset();
     callback save();
+    callback copy-diagnostics();
 }
 
 export global Storage {
@@ -200,4 +241,16 @@ export global Updates {
     callback resume-duplicate();
     callback official(bool);
     callback open-link(string);
+}
+
+export global Reminder {
+    in property <[UpdateNoticeRow]> items;
+    in property <int> unread;
+    in property <string> checked;
+    in property <string> api-status;
+    callback dismiss();
+    callback open();
+    callback download(string);
+    callback ignore(string, string);
+    callback ignore-all();
 }
