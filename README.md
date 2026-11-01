@@ -10,11 +10,21 @@
 
 ## 简体中文
 
-面向 Windows 的 GitHub Release 附件下载工具。v0.2.8 支持自定义应用数据目录，迁移前可选择保留备份或在新目录成功启动后清理旧应用数据，下载进度会保存并暂停。保留直链与确认页布局及 v0.2.5 的数据库兼容修复，继续采用 Slint + Rust + SQLite，提供项目附件选择、批量下载、托盘、限速、历史检索、收藏和版本检查。线路自动恢复、低速换线建议、耗时统计和 Markdown 更新说明保持可用。应用界面为简体中文，默认串行下载；本文档提供中英双语说明。
+面向 Windows 的 GitHub Release 附件下载工具。v0.3.0 把收藏检查升级为可持续的更新跟踪：失败按指数退避重试，检查间隔与自动下载可配置，发现新版本后通过托盘状态、导航角标和置顶提醒窗提示，未读状态持久化并可逐项忽略。收藏页支持发布时间、更新摘要、一键下载、关注规则与手动取消检查；版本页补充发布日期、Markdown 更新说明和附件平台筛选；直链批量预览不再逐条请求 GitHub API，并新增 API 配额可见、不可用引导与本地诊断日志。继续采用 Slint + Rust + SQLite，保留下载、历史、收藏、设置四个入口和串行下载；本文档提供中英双语说明。
 
 顶部三个徽章分别说明项目 MIT 许可证及 Slint、Rust 技术栈，使用无需申请的 [Shields.io 徽章](https://shields.io/badges/static-badge)，不代表安全认证或 Windows 代码签名。
 
-## v0.2.8 更新内容
+## v0.3.0 更新内容
+
+- 收藏检查支持 15 分钟／1 小时／6 小时／24 小时四档间隔；单次失败从 30 分钟起指数退避（最长 6 小时），成功后恢复所选间隔，并优先处理已到期的收藏。升级后既有收藏的最新版本视为已读，不会首次启动就全量弹窗。
+- 收藏页新增“有更新”筛选、未读圆点与“新版本”徽标、发布时间和更新摘要；卡片可直接“下载最新版”或“查看附件”，也可“标为已读／忽略”。检查过程中显示进度并可取消。
+- 新版本提醒通过导航角标、托盘提示和置顶提醒窗呈现；提醒窗列出项目、版本、日期与摘要，支持查看、下载、逐项忽略和全部忽略。未读状态持久化到数据库，重启后保留。
+- “设置 → 收藏检查”可配置新版本提醒、自动下载最新版、是否包含预发布、附件选择模式（优先安装包／全部附件／不自动下载）与自动匹配当前平台；每张收藏卡还可单独设置关注规则，附件模式支持 `*` 和 `?` 通配符和 `{version}` 占位。
+- 版本页显示发布日期，并可直接展开 Markdown 更新说明；附件列表支持平台筛选、自动匹配、全选与清空。直链批量预览不再逐条请求 API；失败时提示稍后重试并显示 API 配额状态。
+- 新增本地日志（5 MB 轮换，仅一个 previous 备份）与“复制诊断信息”；记录启动、检查、任务完成／失败、API 状态和未读数变化，不记录令牌或剪贴板内容。保留 SQLite `user_version=2` 与免安装方式。
+- 界面动效统一为 80–260ms 的 Slint 属性动画：按钮、开关、输入框、进度条、导航下划线与页面切换、收藏更新提醒窗入场；收藏卡片增加共享磁吸高亮、标题入场及抬升/按下反馈。设置新增“减少界面动效”，Windows 关闭“显示动画”时自动生效，不影响数据刷新与布局。
+
+## v0.2.8 更新内容（历史）
 
 - “设置 → 数据管理”支持输入或浏览新的空数据目录，选择保留原目录备份、迁移后清理旧应用数据或取消。
 - 迁移前保存并暂停下载，校验数据库和已有备份后自动重启；任务保持暂停，可手动继续。下载文件和续传分片保留原位置。
@@ -101,28 +111,43 @@ https://github.com/{owner}/{repo}/releases/tag/{tag}
 - **限速与队列**：设置使用十进制 MB/s，支持小数，0 为不限速，保存后立即生效，两路分片共享额度；限速等待可被取消、暂停和退出打断，且不算网络无数据超时。线路检测流量不受传输限速影响。等待任务可上移、下移、置顶，不抢占活动任务，也不自动启动暂停任务。顺序发生竞争时刷新后重试。
 - **历史**：按文件名、仓库、版本搜索，状态筛选，每页 20 条。打开或刷新时只检查当前页成品是否存在；缺失和不可访问分别显示。可以打开目录、复制链接、重新下载，完成/取消任务可移除记录而保留成品。旧任务无可信完成时间时显示“未知”。
 - **收藏**：从仓库链接或任务来源添加，最多 200 项，收藏之间独立于下载任务。初次成功检查建立正式版基线，以 Release ID 记录已提醒版本；预发布不自动提醒。删除收藏不影响文件和任务。
-- **检查调度**：默认手动；可启用应用运行期间每 6 小时检查，退出即停止，无后台服务或自启。官方目录、收藏、自身更新共享串行请求、60 秒缓存和条件请求，重复操作合并到缓存结果。检查失败保留上次成功版本，尊重 `Retry-After` 和 API 限流重置时间。未认证请求仍受 GitHub 配额限制，条件请求不保证免配额。
+- **检查调度**：默认手动；可启用应用运行期间按 15 分钟／1 小时／6 小时／24 小时检查，退出即停止，无后台服务或自启。每项收藏记录 `next_check`，失败按 30 分钟→1→2→4→6 小时退避，成功后恢复所选间隔；已到期项优先。官方目录、收藏、自身更新共享串行请求、60 秒缓存和条件请求，重复操作合并到缓存结果。检查失败保留上次成功版本，尊重 `Retry-After` 和 API 限流重置时间。未认证请求仍受 GitHub 配额限制，条件请求不保证免配额。
 
 ## 前端页面与交互
 
-Slint 保留下载、历史、收藏、设置四个顶层入口，以进程内页面状态切换。下载的三个模块采用 A 紧凑工作台，设置的五个模块采用 B 宽松卡片，更新、关于和完成提醒采用 C 分区布局；共用浅蓝背景、白色内容区、绿色主操作与既有 Phosphor 图标。历史、收藏只继承公共控件外观，不重新设计内容布局。
+Slint 使用统一左侧导航组织下载、历史、收藏、设置四个入口，以进程内页面状态切换。下载组包含下载队列、新建下载与线路检测；窗口宽度小于 900px 时侧栏收为图标，下载模块入口移到正文顶部。页面共用中性浅灰背景、白色内容区、绿色主操作与既有 Phosphor 图标，保留 Windows 原生标题栏与减少动效设置。
+
+收藏页卡片视图使用一个共享绿色细框跟随悬停卡片，保留原有响应式列数、内容高度与虚拟列表。`native-desktop/ui/bento.slint` 中的 `BentoGrid` 管理目标与 60ms 间隙接续，`MagneticIndicator` 以 260ms、`spring(0)` 插值内容坐标，滚动偏移即时叠加；`BentoCard` 提供 140ms 上抬 2px、90ms 按下 1px 的视觉反馈，内部按钮沿用原操作。`MotionReveal` 仅在进入收藏页时让标题整体于 180ms 内淡入、上移 6px，收藏页不再叠加整页入场。列表视图保持原有交互。
+
+新增参数集中在 `native-desktop/ui/motion.slint` 的 `Motion` / `MotionCurves`，组件的 `duration`、`easing`、`gap-delay`、`hover-duration`、`press-duration`、`lift`、`press-depth`、`distance` 可按需覆盖；圆角与卡片间距复用 `Theme.panel-radius` / `Theme.card-gap`。开启“减少界面动效”后，新增动画、延迟和位移归零，标题立即显示，保留即时高亮、按下色差与原有键盘焦点。Windows 系统动画偏好仍在启动时读取并缓存，运行中修改系统设置需重启。触控支持按压反馈，滑动取消后清理目标；磁吸悬停面向鼠标。
+
+使用隔离目录预览（不访问正式收藏数据）：
+
+```powershell
+.\scripts\native-cargo.ps1 -CargoArguments @(
+  'run','--locked','--offline','--',
+  '--data-dir','F:\Program\githubsp\artifacts\verification\bento-motion\preview-data'
+)
+```
+
+在收藏页加入几个项目后连续悬停、展开更多操作并滚动；再到“设置 → 窗口与提醒”开启减少动效并保存，对照即时反馈。自动测试的 200 项数据与截图位于 `artifacts/verification/bento-motion/`，软件渲染截图不代表 DX12 帧率。
 
 - **统计与详情**：队列四项统计为任务总数、执行中、排队中、等待线路恢复。总数来自全库 `Snapshot.total_tasks`，其余直接按任务状态计算；结束记录仍只显示最近 50 条。展开详情分别绑定来源、路径、下载量与累计执行耗时，宽屏信息与操作双栏，窄屏堆叠。
 - **设置卡片与窗口**：窗口行为与完成提醒各用一张卡片；收藏检查的旁栏明确标注功能示意，仅展示应用内收藏的实际范围。数据管理分为实际目录、SQLite 备份、当前运行导出反馈。不限速开关由当前输入的数值派生，0、0.0 和带空白的 0 保持一致；输入、滑块和保存校验共用现有 Rust 适配层。更新仍在主窗口内显示模态层，关于和完成提醒仍是独立窗口；许可证完整保留分页与 `AboutSlint`。
 
-- **下载工作台**：保留顶部四页导航，下载页左侧分为“下载队列／新建下载／线路检测”，默认显示队列。队列填满右侧剩余高度，列表独立滚动，标题和批量操作固定。内容区达到 1000px 时使用完整表格，文件名列伸展、操作列靠右；较窄时使用两行任务条目，线路、剩余时间和完整文件名可在详情查看。任务的更多按钮展开来源、目录、换线及队列排序。全部继续只处理暂停/失败任务，全部暂停处理活动、排队和等待网络恢复任务；批量操作遇到失败即停止并显示错误。清空已完成需要确认，仅移除记录。
+- **下载工作台**：统一侧栏的下载分组包含“下载队列／新建下载／线路检测”，默认显示队列。队列填满右侧剩余高度，列表独立滚动，标题和批量操作固定。正文达到 760px 时显示序号、文件名、进度、速度、状态、操作六列；默认 1040px 窗口可显示表格，较窄时使用两行任务条目。来源位于文件名下方，线路、剩余时间、大小、耗时和完整文件名可在详情查看。任务的更多按钮展开来源、目录、换线及队列排序。全部继续只处理暂停/失败任务，全部暂停处理活动、排队和等待网络恢复任务；批量操作遇到失败即停止并显示错误。清空已完成需要确认，仅移除记录。
 - **队列展示与执行顺序**：下载队列按添加时间倒序展示，时间相同时按任务 ID 倒序；暂停、重试、完成和进度刷新不改变展示位置。表格第一列为“序号”，从 1 递增，随新增和删除重新编号，表示当前显示位置。实际下载沿用后台串行排队顺序；排队任务的展开详情显示“待下载顺序：第 N 位”，“提前一位／延后一位／优先下载”只调整待下载任务的执行顺序，当前下载继续执行，列表仍按添加时间排列。展示排序不修改后台快照、队列位置或数据库，保留现有滚动行为。
 - **新建与预览**：保存目录由“直链下载／仓库附件／批量链接”共享，三种输入分别保留；线路检测使用独立的检测地址。仓库附件在宽内容区双栏显示，窄内容区上下排列。预览在新建模块内进入确认步骤，返回修改保留选择；全部创建成功切回队列，部分失败保留未成功的链接或附件选择。切换模块、页面或输入后，迟到的附件与目录选择结果不再覆盖当前内容。收藏浏览直接进入仓库附件，新版下载和完成提醒的“查看下载”进入队列。模块选择和草稿只保留在当前运行期间，不新增数据库配置。
 - **新建下载布局**：先输入仓库地址，再从左侧版本列表和右侧附件表选择，保存目录位于资源选择之后；正文宽度不足 660px 时上下排列。固定底栏汇总当前选择的数量和大小，跨版本选择按所选附件合计，继续沿用现有大小显示精度。版本分页位于版本列表顶部，当前版本说明位于列表底部。短窗口收起辅助副标题，正文滚动，预览和确认操作固定可达。
 - **直链与确认布局**：直链页左侧填写链接和保存目录，右侧显示下载说明；确认页左侧核对附件及有效／重复／无效状态，右侧集中显示预览时的保存目录、已知大小、未知大小项数、可用空间与下载线路。正文不足 660px 时两栏上下排列，列表独立滚动，返回与创建按钮固定在底部。状态标签保持紧凑，创建按钮显示有效任务数量；重复项保留继续原任务入口，无效项显示原因，未知大小不推断为零。仓库附件和批量链接沿用同一确认组件，目录校验、最多 100 项、仅创建有效任务及部分失败保留输入的规则不变。
 - **线路检测布局**：地址与检测入口固定在左侧结果区顶部，列表展示真实速度、状态和错误；内容宽度达到 720px 时，右侧独立显示最快结果和检测说明，窄窗口将摘要放在结果列表下方。最快名称与速度直接映射 `Snapshot`，重新检测时清空旧摘要；没有检测来源的最快摘要明确提示为历史结果。使用已有云下载、广播与链接图标，不引入示例域名、延迟或未经判定的“低速”标签。
 - **版本分页**：加载提示固定在新建模块标题栏右侧，空闲时保留占位。请求期间保留旧版本、附件和页码，成功后更新，失败保留原页并提示错误。临时等待的控件保持原有明暗且禁止重复操作；页码边界、无附件选择等原本不可用的控件仍灰显。加载提示出现或消失不改变模块和底部操作的位置，较长内容在模块内部滚动。
-- **历史**：统一关键词搜索和状态筛选、统计卡、独立滚动的记录表格与页码跳转。匹配记录数来自数据库，其余统计只代表当前页；每页仍为 20 条。删除末页最后一条记录后回到有效页。
-- **收藏**：项目卡片和列表两种布局，可按检查结果筛选，按检查时间或项目名称排序。统计与标签使用真实的检查成功、失败、待检查状态，不推断“今日更新”或已安装版本。
-- **设置**：左侧分为“下载设置／窗口与提醒／收藏检查／数据管理／软件更新与关于”，右侧一次显示一个模块。底部“保存全部设置／恢复全部默认”固定可见并作用于全部设置；跨模块和页面保留草稿，非法限速会定位到下载设置，保存失败保留输入。限速输入为 0 或 0.001024–10240 MB/s；滑块用于 0–100 MB/s 的快捷调整，步长 0.25 MB/s，更高值通过输入框设置。Rust 接口和存储仍使用整数 `limitKib`，未编辑限速时原值保存；新输入换算到最近的整数 KiB/s，保存成功回显实际值。恢复默认只修改表单，点击保存后才生效；收藏自动检查间隔仍固定为 6 小时。
-- **适配与状态**：下载、设置页采用固定左侧导航与独立内容滚动，窄窗口仍保留文字导航；历史与收藏保留原有滚动方式。保留后端未就绪、加载、空记录、文件不可访问和错误状态。列表、历史及附件选择不显示常态校验标记；历史统计按任务状态显示本页下载失败数，收尾阶段显示“正在完成下载”。旧浏览器入口已删除。设置新增数据位置、打开数据目录和导出备份。
+- **历史**：统一关键词搜索和状态筛选、紧凑统计、独立滚动的响应式记录列表与页码跳转。详情展开显示完整文件名、保存路径、完成时间以及复制链接和移除操作，无需横向滚动寻找操作。匹配记录数来自数据库，其余统计只代表当前页；每页仍为 20 条。删除末页最后一条记录后回到有效页。
+- **收藏**：项目卡片和列表两种布局，仓库卡片按实际内容确定高度，更多菜单展开已读、关注规则、复制和移除操作；可按检查结果筛选，按检查时间或项目名称排序。统计与标签使用真实的检查成功、失败、待检查状态，不推断“今日更新”或已安装版本。
+- **设置**：正文顶部以横向分区显示“下载设置／窗口与提醒／收藏检查／数据管理／软件更新与关于”，一次显示一个模块；最小窗口下长标签换行，全部入口仍可见。底部“保存全部设置／恢复全部默认”固定可见并作用于全部设置；跨模块和页面保留草稿，非法限速会定位到下载设置，保存失败保留输入。限速输入为 0 或 0.001024–10240 MB/s；滑块用于 0–100 MB/s 的快捷调整，步长 0.25 MB/s，更高值通过输入框设置。Rust 接口和存储仍使用整数 `limitKib`，未编辑限速时原值保存；新输入换算到最近的整数 KiB/s，保存成功回显实际值。恢复默认只修改表单，点击保存后才生效；收藏检查间隔、提醒、自动下载、预发布、附件模式和自动匹配均在“收藏检查”中配置。
+- **适配与状态**：全局侧栏固定，窄窗口使用有无障碍名称的图标入口；下载、设置正文独立滚动，历史与收藏保留外层滚动和内部虚拟列表。保留后端未就绪、加载、空记录、文件不可访问和错误状态。列表、历史及附件选择不显示常态校验标记；历史统计按任务状态显示本页下载失败数，收尾阶段显示“正在完成下载”。旧浏览器入口已删除。设置新增数据位置、打开数据目录和导出备份。
 
-参考图中的示例版本、地区线路、延迟、并发设置及自动生成源码包不代表现有产品能力。软件版本为 0.2.8，窗口按钮由原生 Windows 标题栏提供。历史视觉核对见 [design-qa.md](design-qa.md)，其中截图和日志属于维护者本地验收资料，不随源码分发；隔离浏览器验收只提供前端证据，不等同于 Windows 原生或真实网络下载验收。
+参考图中的示例版本、地区线路、延迟、并发设置及自动生成源码包不代表现有产品能力。软件版本为 0.3.0，窗口按钮由原生 Windows 标题栏提供。历史视觉核对见 [design-qa.md](design-qa.md)，其中截图和日志属于维护者本地验收资料，不随源码分发；隔离浏览器验收只提供前端证据，不等同于 Windows 原生或真实网络下载验收。
 
 ## GitHubSP 自身更新源
 
@@ -334,11 +359,22 @@ v0.2.7 的完成提醒修复在发布前已于当前开发机通过上述真实�
 
 ## English
 
-GitHubSP v0.2.8 is a Windows desktop downloader for public GitHub Release assets, built with Slint, Rust, and SQLite. This version adds custom application data directories, with a choice to retain the original data as a backup or clean up migrated application data after the new location starts successfully. Downloads are saved and paused during migration. It retains the direct-link and confirmation layouts, the v0.2.5 storage compatibility fix, release browsing, batch previews, a system tray, bandwidth limits, searchable history, favorites, and update checks. Route recovery, confirmation-based route suggestions, elapsed-time statistics, and Markdown notes remain available. The application UI is in Simplified Chinese; this README is bilingual. Downloads run sequentially by default.
+GitHubSP v0.3.0 is a Windows desktop downloader for public GitHub Release assets, built with Slint, Rust, and SQLite. This version turns favorite checks into continuous update tracking: checks use a configurable 15-minute/1-hour/6-hour/24-hour interval, failures retry with exponential backoff, and new versions surface through a tray tooltip, navigation badge, and a pinned reminder window. Unread state is persisted, and each favorite can be acknowledged or ignored. Favorites show publication date, update summary, one-click download, per-project watch rules, and a cancellable check progress view. Release pages add publication dates, inline Markdown notes, and platform filters; direct-link batch previews no longer call the GitHub API per URL. API quota visibility, guidance when the API is unavailable, and a local diagnostic log are included. The application UI is in Simplified Chinese; this README is bilingual. Downloads run sequentially by default.
+
 
 The three badges identify the project MIT license and the Slint / Rust technology stack. They use [Shields.io static badges](https://shields.io/badges/static-badge), which require no application or approval. They do not certify security or provide Windows code signing.
 
-## v0.2.8 changes
+## v0.3.0 changes
+
+- Favorite checks support 15-minute, 1-hour, 6-hour, and 24-hour intervals. Failures retry with exponential backoff from 30 minutes up to 6 hours; a success restores the selected interval, and due favorites run first. Existing favorites are treated as read after upgrading, so the first launch does not show every project as unread.
+- Favorites gain an "updates" filter, unread dot and "new version" badge, publication date, and summary, with one-click "download latest", "view assets", "mark read", and "ignore" actions. Running checks show progress and can be cancelled.
+- New versions are announced through the navigation badge, tray tooltip, and a pinned reminder window listing project, version, date, and summary, with view, download, ignore-one, and ignore-all actions. Unread state is stored in SQLite and survives restarts.
+- Settings → favorite checks configures notifications, automatic download, prerelease inclusion, asset mode (prefer installer / all assets / no automatic download), and platform auto-matching. Each favorite can also define its own rule; patterns support `*`, `?`, and `{version}`.
+- Release pages show publication dates and expandable Markdown notes; asset lists support platform filtering, auto-match, select-all, and clear. Direct-link batch preview no longer calls the API per URL, and API failures report quota state or suggest a later retry.
+- A local log (5 MB rotation, one previous file) and "copy diagnostics" action record startup, checks, task completion/failure, API state, and unread-count changes without tokens or clipboard contents. SQLite `user_version=2` and the portable executable model remain unchanged.
+- Motion is implemented with native Slint property animations (80–260 ms) for buttons, switches, inputs, progress bars, navigation underline/page transitions, and the favorites reminder window. Favorite cards add one shared magnetic outline, a title entrance, and hover/press feedback while retaining the existing virtual list and actions. A "reduce motion" setting is honored automatically when Windows animations are disabled, without affecting data refresh or layout. The Windows preference is cached at startup; changing it requires restarting the app.
+
+## v0.2.8 changes (history)
 
 - Settings → Data management now accepts a new empty data directory, with choices to retain the original as a backup, clean up migrated application data, or cancel.
 - Migration saves and pauses downloads, verifies the database and existing backups, then restarts automatically. Tasks remain paused for manual continuation; downloaded files and resume parts stay where they are.
@@ -397,20 +433,20 @@ Public GitHub HTTPS URLs are supported; credentials, queries, fragments, unsafe 
 
 ## Interface and interaction
 
-The four Slint pages use in-process page state. Shared styles use a light-blue background, white panels, green primary actions, and Phosphor icons.
+The four Slint pages share one fixed left navigation and in-process page state. Below 900px window width, the sidebar becomes an icon rail with accessible labels and download modules move to tabs above the content. Shared styles use neutral gray surfaces, white content, green primary actions, and Phosphor icons; native Windows title-bar controls and reduced motion remain available.
 
 The download list sorts by creation time descending, then ID descending for ties. The “序号” column numbers display rows from 1 and is independent of download priority. Queued-task details show the actual queued position; moving a task earlier, later or first changes only its execution order without preempting the active download. Progress and status refreshes retain creation-time ordering, and the existing recent-50 retention and scrolling behavior remain in place.
 
-- **Download workspace:** the top-level navigation is retained. A left sidebar selects Queue, New download, or Route diagnostics, with Queue as the default. The queue fills the available height and scrolls independently beneath fixed actions. Content areas at least 1000px wide show the complete table with a stretching filename column and right-aligned actions; narrower areas use two-line task rows, with route, remaining time, and full filenames in details. Task details expose source, directory, route, and queue controls. Resume-all handles paused/failed tasks; pause-all handles active/waiting tasks. Bulk actions stop and report the first error. Clearing completed records requires confirmation and preserves files.
+- **Download workspace:** the Download group in the global sidebar selects Queue, New download, or Route diagnostics, with Queue as the default. The queue fills the available height and scrolls independently beneath fixed actions. Content areas at least 760px wide show six columns: row number, filename/source, progress, speed, status, and actions. The default 1040px window supports this table; narrower content uses two-line rows. Route, remaining time, elapsed time, and full paths remain available in details. Task details expose source, directory, route, and queue controls. Resume-all handles paused/failed tasks; pause-all handles active/waiting tasks. Bulk actions stop and report the first error. Clearing completed records requires confirmation and preserves files.
 - **Creation and preview:** Direct link, Repository assets, and Batch links share the destination directory while retaining separate inputs. Diagnostics has its own address field. Repository versions and assets use columns on wide content areas and stack on narrow ones. Preview replaces the editing step within the module; returning preserves selection. Complete success opens the queue, while partial failures retain unsuccessful links or asset selections. Navigation or input changes invalidate late directory and asset results. Favorites open repository assets; app-update downloads and completion notices open the queue. Navigation and drafts remain session-only and add no stored settings.
 - **Direct-link and confirmation layout:** the direct-link form places URL and destination inputs beside a short download guide. Confirmation places the file/status list beside the preview destination, known size, unknown-size count, free space, and route selector. Content narrower than 660px stacks these regions; the list scrolls independently and Back/Create actions remain pinned below. Compact status badges distinguish valid, duplicate, and invalid entries, and Create shows the valid count. Duplicate entries retain the existing-task action; errors remain visible and unknown sizes are not treated as zero. Repository assets and batch links share this view without changing directory checks, the 100-item limit, valid-only creation, or partial-failure draft preservation.
 - **Release pagination:** loading feedback occupies a reserved slot on the right of the creation-module heading, including while idle. Requests retain the previous releases, assets, and page number until success; failures keep that page and show an error. Temporarily locked controls retain their normal appearance while preventing duplicate actions; controls already unavailable because of page boundaries or empty selections remain subdued. Loading feedback does not shift the module or its fixed footer; longer content scrolls within the module.
-- **History:** shared search and status filters, summary cards, an independently scrollable table, and page navigation. The matched count comes from the backend; other statistics cover only the current page. Pages contain 20 records. Removing the last record on the last page returns to a valid page.
-- **Favorites:** card/list layouts, result filters, and sorting by last check or repository name. Labels show actual successful, failed, or pending checks without inferring updates “today” or installed versions.
-- **Settings:** the sidebar selects Download settings, Window and reminders, Favorite checks, Data management, or Updates and About. One module is shown at a time. Save all settings and Restore all defaults remain visible at the bottom and apply across modules. Drafts survive page and module switches; an invalid limit opens Download settings, and a failed save retains input. Limit input accepts 0 or 0.001024–10240 MB/s. The slider covers 0–100 MB/s in steps of 0.25 MB/s; higher limits use numeric entry. Rust interfaces and storage retain integer `limitKib`: unedited limits are preserved exactly, while new input is rounded to the nearest KiB/s and the saved value is displayed. Restoring defaults changes the draft only until saved. Automatic favorite checks retain the fixed six-hour interval.
-- **Responsive and error states:** Downloads and Settings use fixed sidebars with visible text labels and independent content scrolling, including narrow windows. History and Favorites retain their existing scrolling. Backend-not-ready, loading, empty, inaccessible-file, and error states remain visible. Download lists, history, and asset selection hide routine verification badges. History counts failed downloads by task status, and finalization displays “正在完成下载”. The browser entry has been removed. Settings expose the data directory and consistent backup export.
+- **History:** shared search and status filters, compact statistics, a responsive scrollable record list, and page navigation. Expand a record for its full filename, path, completion time, copy-link and remove actions without horizontal scrolling. The matched count comes from the backend; other statistics cover only the current page. Pages contain 20 records. Removing the last record on the last page returns to a valid page.
+- **Favorites:** card/list layouts with content-sized repository cards, result filters, and sorting by last check or repository name. More actions expand read-state, watch-rule, copy-link, and removal controls. Labels show actual successful, failed, or pending checks without inferring updates “today” or installed versions.
+- **Settings:** horizontal section tabs select Download settings, Window and reminders, Favorite checks, Data management, or Updates and About; long labels wrap in the smallest window so every section remains reachable. One module is shown at a time. Save all settings and Restore all defaults remain visible at the bottom and apply across modules. Drafts survive page and module switches; an invalid limit opens Download settings, and a failed save retains input. Limit input accepts 0 or 0.001024–10240 MB/s. The slider covers 0–100 MB/s in steps of 0.25 MB/s; higher limits use numeric entry. Rust interfaces and storage retain integer `limitKib`: unedited limits are preserved exactly, while new input is rounded to the nearest KiB/s and the saved value is displayed. Restoring defaults changes the draft only until saved. Favorite checks expose interval, notifications, automatic download, prerelease, asset mode, and platform auto-matching in the Favorite checks module.
+- **Responsive and error states:** one fixed global sidebar becomes an icon rail on narrow windows, while download and settings modules keep independently scrollable content. History and Favorites retain their existing scrolling. Backend-not-ready, loading, empty, inaccessible-file, and error states remain visible. Download lists, history, and asset selection hide routine verification badges. History counts failed downloads by task status, and finalization displays “正在完成下载”. The browser entry has been removed. Settings expose the data directory and consistent backup export.
 
-Reference images are not promises of extra versions, regional routes, latency metrics, parallel task settings, or support for generated source archives. The app version is 0.2.8, and window controls are provided by the native Windows title bar. [design-qa.md](design-qa.md) contains the historical visual review in Chinese. Its screenshots and logs are local maintainer evidence, not distributed source. Isolated browser checks establish frontend behavior, not native Windows or real-network acceptance.
+Reference images are not promises of extra versions, regional routes, latency metrics, parallel task settings, or support for generated source archives. The app version is 0.3.0, and window controls are provided by the native Windows title bar. [design-qa.md](design-qa.md) contains the historical visual review in Chinese. Its screenshots and logs are local maintainer evidence, not distributed source. Isolated browser checks establish frontend behavior, not native Windows or real-network acceptance.
 
 ## Application update source
 
