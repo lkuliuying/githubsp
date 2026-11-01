@@ -331,6 +331,21 @@ impl Drop for Instance {
     }
 }
 
+/// 系统“显示动画”关闭时返回 true；结果在进程内缓存。
+pub fn system_reduce_motion() -> bool {
+    static REDUCED: OnceLock<bool> = OnceLock::new();
+    *REDUCED.get_or_init(|| unsafe {
+        let mut enabled: i32 = 0;
+        let ok = SystemParametersInfoW(
+            SPI_GETCLIENTAREAANIMATION,
+            0,
+            &mut enabled as *mut i32 as *mut std::ffi::c_void,
+            0,
+        );
+        ok != 0 && enabled == 0
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

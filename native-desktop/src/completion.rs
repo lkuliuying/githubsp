@@ -34,7 +34,7 @@ impl CreationContext {
         }
     }
 
-    fn during<T>(&self, create: impl FnOnce() -> T) -> T {
+    pub(crate) fn during<T>(&self, create: impl FnOnce() -> T) -> T {
         struct Restore<'a>(&'a Cell<bool>, bool);
         impl Drop for Restore<'_> {
             fn drop(&mut self) {

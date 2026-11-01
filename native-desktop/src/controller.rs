@@ -3,7 +3,7 @@ use crate::{
     presentation,
     service::Service,
     sources::Inputs,
-    History, MainWindow, Preferences, Sources, Updates, Workspace,
+    History, MainWindow, Motion, Preferences, Sources, Updates, Workspace,
 };
 use githubsp_lib::{
     manager::Action,
@@ -74,6 +74,16 @@ pub fn bind(window: &MainWindow, service: &Arc<Service>, runtime: &tokio::runtim
             }
             if page == 1 {
                 window.global::<History>().invoke_load(1);
+            }
+            let animate = !window.global::<Motion>().get_reduce();
+            window.set_page_entering(!animate);
+            if animate {
+                let weak = window.as_weak();
+                slint::Timer::single_shot(std::time::Duration::from_millis(16), move || {
+                    if let Some(window) = weak.upgrade() {
+                        window.set_page_entering(true);
+                    }
+                });
             }
         });
     }

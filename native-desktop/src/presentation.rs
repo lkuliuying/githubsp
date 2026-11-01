@@ -1,4 +1,4 @@
-use crate::{MainWindow, RouteRow, TaskRow, Workspace};
+use crate::{MainWindow, Reminder, RouteRow, TaskRow, UpdateNoticeRow, Workspace};
 use githubsp_lib::model::{Snapshot, Task, TaskStatus, Verification};
 use slint::{ComponentHandle, Model, ModelRc, VecModel};
 use std::rc::Rc;
@@ -320,6 +320,104 @@ pub fn apply(window: &MainWindow, snapshot: &Snapshot) {
             .into(),
     );
     ui.set_diagnosing(snapshot.diagnosing);
+    let unread: Vec<_> = snapshot
+        .favorites
+        .iter()
+        .filter(|favorite| snapshot.watch_state.is_unread(favorite))
+        .collect();
+    ui.set_unread_updates(unread.len() as i32);
+    ui.set_checking(snapshot.checking.active);
+    ui.set_checking_text(
+        if snapshot.checking.active {
+            format!(
+                "正在检查 {}/{}：{}",
+                snapshot.checking.done,
+                snapshot.checking.total,
+                snapshot.checking.current.as_deref().unwrap_or("准备中")
+            )
+        } else if snapshot.checking.cancelled {
+            "上次检查已取消".into()
+        } else {
+            String::new()
+        }
+        .into(),
+    );
+    ui.set_checking_progress(if snapshot.checking.total == 0 {
+        0.0
+    } else {
+        (snapshot.checking.done as f32 / snapshot.checking.total as f32).clamp(0.0, 1.0)
+    });
+    let api = &snapshot.api_status;
+    let api_warning = api.remaining.is_some_and(|remaining| remaining < 10)
+        || api.error.is_some()
+        || api.source.as_deref() == Some("atom");
+    ui.set_api_warning(api_warning);
+    ui.set_api_status(
+        if let Some(remaining) = api.remaining {
+            format!(
+                "GitHub API 剩余 {}/{} 次{}",
+                remaining,
+                api.limit.unwrap_or(60),
+                api.reset_at
+                    .map(|at| format!(" · {} 重置", crate::system_actions::date(Some(at))))
+                    .unwrap_or_default()
+            )
+        } else if api.source.as_deref() == Some("atom") {
+            "GitHub 官方接口暂不可用，已切换 Atom 更新源；发布状态与附件信息可能不完整。".into()
+        } else if let Some(error) = &api.error {
+            format!("GitHub 接口不可用：{error}")
+        } else {
+            "尚未获取 GitHub API 配额".into()
+        }
+        .into(),
+    );
+    let reminder = window.global::<Reminder>();
+    let mut items: Vec<_> = unread
+        .iter()
+        .filter_map(|favorite| {
+            let latest = favorite.latest.as_ref()?;
+            let entry = snapshot.watch_state.entry(&favorite.repository);
+            let summary = entry
+                .and_then(|entry| entry.notes_excerpt.as_deref())
+                .map(|notes| {
+                    notes
+                        .lines()
+                        .next()
+                        .unwrap_or("")
+                        .chars()
+                        .take(160)
+                        .collect::<String>()
+                })
+                .unwrap_or_default();
+            Some(UpdateNoticeRow {
+                repository: favorite.repository.as_str().into(),
+                tag: latest.tag.as_str().into(),
+                published: crate::system_actions::date(
+                    entry
+                        .and_then(|entry| entry.published_at)
+                        .or(latest.published_at),
+                )
+                .into(),
+                summary: summary.into(),
+                release_id: latest.id.to_string().into(),
+            })
+        })
+        .collect();
+    items.sort_by(|a, b| b.published.cmp(&a.published));
+    items.truncate(5);
+    reminder.set_items(model(items));
+    reminder.set_unread(unread.len() as i32);
+    reminder.set_checked(
+        format!(
+            "检查于 {}",
+            snapshot.checking.finished_at.map_or_else(
+                || "尚未检查".into(),
+                |at| crate::system_actions::date(Some(at)),
+            )
+        )
+        .into(),
+    );
+    reminder.set_api_status(ui.get_api_status());
     ui.set_route_target(
         snapshot
             .diagnostic_context

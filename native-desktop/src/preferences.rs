@@ -32,6 +32,20 @@ fn apply(window: &MainWindow, settings: &Settings) {
     ui.set_close_to_tray(settings.close_to_tray);
     ui.set_completion(settings.background_completion_notice);
     ui.set_auto_check(settings.auto_check);
+    ui.set_interval(
+        Settings::CHECK_INTERVALS_MS
+            .iter()
+            .position(|interval| *interval == settings.watch_interval_ms)
+            .unwrap_or(2) as i32,
+    );
+    ui.set_notifications(settings.watch_notifications);
+    ui.set_auto_download(settings.watch_auto_download);
+    ui.set_prerelease(settings.watch_include_prerelease);
+    ui.set_asset_mode(settings.watch_asset_mode.min(2) as i32);
+    ui.set_asset_pattern(settings.watch_asset_pattern.clone().into());
+    ui.set_auto_platform(settings.auto_match_platform);
+    ui.set_log(settings.log_enabled);
+    ui.set_reduce_motion(settings.reduce_motion);
 }
 
 pub fn has_unsaved(window: &MainWindow, service: &Service) -> bool {
@@ -46,6 +60,16 @@ pub fn has_unsaved(window: &MainWindow, service: &Service) -> bool {
         || ui.get_close_to_tray() != saved.close_to_tray
         || ui.get_completion() != saved.background_completion_notice
         || ui.get_auto_check() != saved.auto_check
+        || Settings::CHECK_INTERVALS_MS.get(ui.get_interval().max(0) as usize)
+            != Some(&saved.watch_interval_ms)
+        || ui.get_notifications() != saved.watch_notifications
+        || ui.get_auto_download() != saved.watch_auto_download
+        || ui.get_prerelease() != saved.watch_include_prerelease
+        || ui.get_asset_mode().clamp(0, 2) as u8 != saved.watch_asset_mode
+        || ui.get_asset_pattern().as_str() != saved.watch_asset_pattern
+        || ui.get_auto_platform() != saved.auto_match_platform
+        || ui.get_log() != saved.log_enabled
+        || ui.get_reduce_motion() != saved.reduce_motion
 }
 
 pub fn bind(window: &MainWindow, api: &Arc<Service>, runtime: &tokio::runtime::Handle) {
@@ -103,6 +127,36 @@ pub fn bind(window: &MainWindow, api: &Arc<Service>, runtime: &tokio::runtime::H
             ui.set_message("已恢复默认值，保存设置后生效。".into());
         }
     });
+    let (weak, api1, runtime1, epoch1) = (
+        window.as_weak(),
+        api.clone(),
+        runtime.clone(),
+        Epoch::default(),
+    );
+    window.global::<Preferences>().on_copy_diagnostics(move || {
+        let Some(window) = weak.upgrade() else {
+            return;
+        };
+        let (manager, directory) = (api1.manager.clone(), api1.data_directory.clone());
+        bridge::run(
+            &window,
+            &api1,
+            &runtime1,
+            Area::Preferences,
+            epoch1.ticket(),
+            async move {
+                let snapshot = manager.snapshot().await.map_err(|e| e.to_string())?;
+                let text = crate::log::diagnostics(&snapshot, &directory);
+                crate::log::copy(&text)?;
+                Ok("诊断信息已复制到剪贴板".to_string())
+            },
+            |window, message| {
+                window
+                    .global::<Preferences>()
+                    .set_diagnostic_message(message.into());
+            },
+        );
+    });
     let (weak, api, runtime, epoch) = (
         window.as_weak(),
         api.clone(),
@@ -130,12 +184,28 @@ pub fn bind(window: &MainWindow, api: &Arc<Service>, runtime: &tokio::runtime::H
                 return;
             }
         };
-        let settings = Settings {
-            limit_kib,
-            close_to_tray: ui.get_close_to_tray(),
-            auto_check: ui.get_auto_check(),
-            background_completion_notice: ui.get_completion(),
-        };
+        let mut settings = api
+            .state
+            .borrow()
+            .as_ref()
+            .map(|snapshot| snapshot.settings.clone())
+            .unwrap_or_default();
+        settings.limit_kib = limit_kib;
+        settings.close_to_tray = ui.get_close_to_tray();
+        settings.auto_check = ui.get_auto_check();
+        settings.background_completion_notice = ui.get_completion();
+        settings.watch_interval_ms = Settings::CHECK_INTERVALS_MS[ui
+            .get_interval()
+            .clamp(0, Settings::CHECK_INTERVALS_MS.len() as i32 - 1)
+            as usize];
+        settings.watch_notifications = ui.get_notifications();
+        settings.watch_auto_download = ui.get_auto_download();
+        settings.watch_include_prerelease = ui.get_prerelease();
+        settings.watch_asset_mode = ui.get_asset_mode().clamp(0, 2) as u8;
+        settings.watch_asset_pattern = ui.get_asset_pattern().trim().to_string();
+        settings.auto_match_platform = ui.get_auto_platform();
+        settings.log_enabled = ui.get_log();
+        settings.reduce_motion = ui.get_reduce_motion();
         ui.set_saved(false);
         let manager = api.manager.clone();
         bridge::run(

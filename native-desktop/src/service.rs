@@ -86,6 +86,17 @@ pub fn urgent(previous: Option<&Snapshot>, next: &Snapshot) -> bool {
         return true;
     };
     previous.error != next.error
+        || previous.watch_state != next.watch_state
+        || previous.checking.active != next.checking.active
+        || previous.favorites.len() != next.favorites.len()
+        || previous
+            .favorites
+            .iter()
+            .map(|f| f.latest.as_ref().map(|latest| latest.id))
+            .ne(next
+                .favorites
+                .iter()
+                .map(|f| f.latest.as_ref().map(|latest| latest.id)))
         || previous.tasks.len() != next.tasks.len()
         || previous
             .notices
@@ -144,6 +155,9 @@ mod tests {
             diagnosing: false,
             notices: vec![],
             favorites: vec![],
+            watch_state: Default::default(),
+            checking: Default::default(),
+            api_status: Default::default(),
         }
     }
 

@@ -483,6 +483,8 @@ mod tests {
             url: "https://github.com/test/repo/releases/tag/v1.2.3".into(),
             notes: "".into(),
             assets: vec![],
+            atom: false,
+            published_at: None,
         }
     }
     fn asset(name: &str) -> Asset {

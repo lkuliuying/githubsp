@@ -132,6 +132,9 @@ fn snapshot(revision: u64, ids: &[&str]) -> Snapshot {
         diagnostic_context: None,
         diagnosing: false,
         favorites: vec![],
+        watch_state: Default::default(),
+        checking: Default::default(),
+        api_status: Default::default(),
         notices: ids
             .iter()
             .map(|id| Notice {

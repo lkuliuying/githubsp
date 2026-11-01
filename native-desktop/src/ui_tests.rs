@@ -1,6 +1,6 @@
 use crate::{
     controller, presentation, service::Service, AboutWindow, CompletionWindow, Favorites, History,
-    MainWindow, Preferences, Sources, Storage, Updates, Workspace,
+    MainWindow, Motion, Preferences, Sources, Storage, Updates, Workspace,
 };
 use githubsp_lib::{
     model::{
@@ -11,6 +11,8 @@ use githubsp_lib::{
 };
 use i_slint_backend_testing::{ElementHandle, TestingBackend, TestingBackendOptions};
 use slint::{ComponentHandle, Model};
+#[path = "motion_ui_tests.rs"]
+mod motion_ui_tests;
 #[path = "storage/ui_tests.rs"]
 mod storage_ui_tests;
 use std::{
@@ -185,6 +187,8 @@ fn seed(path: &Path) {
                     id: 1,
                     tag: "v1.2.3".into(),
                     url: format!("https://github.com/test/project-{index}/releases/tag/v1.2.3"),
+                    atom: false,
+                    published_at: None,
                 }),
                 seen: vec![1],
                 last_checked: Some(1_790_000_000_000),
@@ -236,7 +240,15 @@ fn navigate(window: &MainWindow, label: &str) {
         .find(|e| e.accessible_role() == Some(i_slint_backend_testing::AccessibleRole::Button))
         .expect("应有原页面导航按钮");
     let position = button.absolute_position();
-    assert!(position.y >= 0.0 && position.y < 140.0, "导航应固定在顶部");
+    let size = button.size();
+    assert!(
+        position.x >= 0.0 && position.x < 192.0,
+        "页面导航应固定在左侧"
+    );
+    assert!(
+        position.y >= 0.0 && position.y + size.height <= window.window().size().height as f32,
+        "页面导航应始终位于窗口内"
+    );
     button.invoke_accessible_default_action();
 }
 
@@ -604,20 +616,19 @@ fn assert_regions_separate(window: &MainWindow, first: &str, second: &str) {
         .next()
         .unwrap();
     let scroll = |delta| {
-        if window.global::<Sources>().get_preview_visible() {
-            scroll_confirmation_page(window, &viewport, delta);
-        } else {
-            viewport.scroll(0.0, delta);
-        }
+        // 正文右侧留白可避开版本/附件列表，让滚轮落到页面滚动容器。
+        scroll_confirmation_page(window, &viewport, delta);
     };
-    // 测试后端只枚举可见元素，窄窗口需先滚动获取两块区域的句柄。
+    // 测试后端只枚举可见元素，窄窗口需先滚动获取两块区域的句柄；堆叠布局可能先向下再向上。
     let find = |id: &str| {
-        for _ in 0..30 {
-            if let Some(element) = ElementHandle::find_by_element_id(window, id).next() {
-                return element;
+        for direction in [1.0, -1.0] {
+            for _ in 0..30 {
+                if let Some(element) = ElementHandle::find_by_element_id(window, id).next() {
+                    return element;
+                }
+                scroll(direction * (viewport.size().height / 2.0).max(20.0));
+                window.window().take_snapshot().unwrap();
             }
-            scroll(-(viewport.size().height / 2.0).max(20.0));
-            window.window().take_snapshot().unwrap();
         }
         panic!("滚动后应能找到区域 {id}");
     };
@@ -702,16 +713,16 @@ async fn verify_direct_and_confirmation_layouts(window: &MainWindow, api: &Arc<S
         ),
         (3, 1, 1)
     );
-    assert_eq!(sources.get_preview_known_size(), "168 MB");
-    assert_eq!(sources.get_preview_unknown_count(), 0);
+    assert_eq!(sources.get_preview_known_size(), "0 B");
+    assert_eq!(sources.get_preview_unknown_count(), 3);
     assert_eq!(
         Path::new(sources.get_preview_directory().as_str()),
         expected_directory
     );
     assert!(!sources.get_preview_available_space().is_empty());
     let rows: Vec<_> = sources.get_preview().iter().collect();
-    assert_eq!(rows[0].size, "86.3 MB");
-    assert_eq!(rows[2].size, "1.2 KB");
+    assert_eq!(rows[0].size, "未知");
+    assert_eq!(rows[2].size, "未知");
     assert_eq!(rows[3].task_id, existing.id);
     assert_eq!(rows[3].tone, 3);
     assert_eq!(rows[4].tone, 2);
@@ -1020,6 +1031,29 @@ fn verify_queue_display_order(original: &githubsp_lib::model::Snapshot) {
     }
 
     let window = MainWindow::new().unwrap();
+    let motion = window.global::<Motion>();
+    motion.set_reduce(false);
+    assert_eq!(motion.get_instant(), 80);
+    assert_eq!(motion.get_fast(), 120);
+    assert_eq!(motion.get_base(), 180);
+    assert_eq!(motion.get_slow(), 260);
+    assert_eq!(motion.get_emphasized(), 360);
+    assert_eq!(motion.get_hover(), 140);
+    assert_eq!(motion.get_press(), 90);
+    assert_eq!(motion.get_ripple(), 300);
+    motion.set_reduce(true);
+    for value in [
+        motion.get_instant(),
+        motion.get_fast(),
+        motion.get_base(),
+        motion.get_slow(),
+        motion.get_emphasized(),
+        motion.get_hover(),
+        motion.get_press(),
+        motion.get_ripple(),
+    ] {
+        assert_eq!(value, 0, "减少动效时所有令牌应为 0");
+    }
     let workspace = window.global::<Workspace>();
     let mut snapshot = original.clone();
     snapshot.tasks = [
@@ -1053,6 +1087,7 @@ fn verify_queue_display_order(original: &githubsp_lib::model::Snapshot) {
     });
     presentation::apply(&window, &snapshot);
     window.show().unwrap();
+    capture(&window, "queue-reference", 1448, 740);
     capture(&window, "queue-newest-first", 1448, 1086);
     let expected = ["latest", "complete", "middle", "early", "running"];
     assert_eq!(displayed_ids(&window), expected);
@@ -1403,9 +1438,19 @@ fn module_pages_bind_to_core_and_remain_usable_at_supported_sizes() {
     fixture_network.client = Default::default();
     Arc::get_mut(&mut api).unwrap().catalog = githubsp_lib::catalog::Catalog::new(fixture_network);
     let window = MainWindow::new().unwrap();
+    window.global::<Motion>().set_reduce(false);
     controller::bind(&window, &api, runtime.handle());
     presentation::apply(&window, &runtime.block_on(api.manager.snapshot()).unwrap());
     window.show().unwrap();
+    // 页面切换先进入过渡态，再由单次 Timer 收尾；避免动画属性卡在不可见状态。
+    window.global::<Workspace>().invoke_navigate(2);
+    slint::platform::update_timers_and_animations();
+    assert!(!window.get_page_entering(), "切页后应进入过渡态");
+    std::thread::sleep(Duration::from_millis(30));
+    slint::platform::update_timers_and_animations();
+    assert!(window.get_page_entering(), "过渡应由 Timer 收尾");
+    motion_ui_tests::verify_favorites_motion();
+    window.global::<Motion>().set_reduce(true);
     let ui = window.as_weak();
     let api1 = api.clone();
     let test_runtime = runtime.handle().clone();
@@ -1422,6 +1467,8 @@ fn module_pages_bind_to_core_and_remain_usable_at_supported_sizes() {
         for (width,height) in [(1448,1086), (1040,740), (720,520)] {
             window.global::<Workspace>().invoke_navigate(0);
             capture(&window,"downloads",width,height);
+            let table_header = ElementHandle::find_by_element_id(&window,"QueuePanel::number-header").next();
+            assert_eq!(table_header.is_some(), width >= 1040, "默认窗口应显示完整队列表头，最小窗口使用双行记录");
             assert_eq!(window.global::<Workspace>().get_download_section(),0);
             for label in ["全部继续","全部暂停","清空已完成","下载队列","线路检测"] {
                 assert_button_in_window(&window,label,width,height);
@@ -1461,6 +1508,7 @@ fn module_pages_bind_to_core_and_remain_usable_at_supported_sizes() {
             assert_eq!(window.global::<History>().get_rows().row_count(),20);
             assert_eq!(window.global::<History>().get_pages(),4);
             capture(&window,"history",width,height);
+            assert_button_in_window(&window,"历史详情与更多操作",width,height);
             scroll_to_bottom(&window); capture(&window,"history-pagination",width,height);
             assert_button_in_window(&window,"跳转",width,height);
             window.global::<History>().invoke_load(4); ready(||!window.global::<History>().get_busy()).await;
@@ -1548,7 +1596,7 @@ fn module_pages_bind_to_core_and_remain_usable_at_supported_sizes() {
         ready(||!history.get_busy()).await;
         assert_eq!(history.get_total(),63); assert_ne!(history.get_revision(),before);
         window.global::<Workspace>().invoke_navigate(2);
-        let favorites = window.global::<Favorites>(); favorites.set_filter(2); favorites.invoke_filter_changed(); assert_eq!(favorites.get_rows().row_count(),0);
+        let favorites = window.global::<Favorites>(); favorites.set_filter(3); favorites.invoke_filter_changed(); assert_eq!(favorites.get_rows().row_count(),0);
         favorites.set_filter(0); favorites.invoke_filter_changed(); assert_eq!(favorites.get_rows().row_count(),4);
         window.global::<Workspace>().invoke_navigate(0);
         window.global::<Sources>().set_batch_input("".into());
@@ -1560,6 +1608,7 @@ fn module_pages_bind_to_core_and_remain_usable_at_supported_sizes() {
             Ok::<_,String>(service)
         }).await.unwrap().unwrap();
         let failed_window = MainWindow::new().unwrap();
+        failed_window.global::<Motion>().set_reduce(true);
         controller::bind(&failed_window,&failed_api,&test_runtime);
         let failed_settings = failed_window.global::<Preferences>();
         failed_settings.set_limit("2.5".into());

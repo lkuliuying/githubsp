@@ -10,10 +10,12 @@ mod desktop;
 mod favorites;
 mod graphics;
 mod history;
+mod log;
 mod notes;
 mod platform;
 mod preferences;
 mod presentation;
+mod reminder;
 mod service;
 mod sources;
 mod storage;
@@ -103,6 +105,7 @@ fn run_with_startup(startup: platform::Startup) -> Result<(), Box<dyn std::error
         return Ok(());
     };
     let _data_guard = githubsp_lib::relocation::DirectoryGuard::acquire(&directory)?;
+    log::init(&directory);
     if let Some(locations) = &startup.locations {
         let selected = locations.selected(&locations.load()?);
         if std::fs::canonicalize(&selected)? != std::fs::canonicalize(&directory)? {
@@ -118,21 +121,37 @@ fn run_with_startup(startup: platform::Startup) -> Result<(), Box<dyn std::error
     if let Some(directory) = &snapshot.last_directory {
         window.set_directory(directory.as_str().into());
     }
+    log::set_enabled(snapshot.settings.log_enabled);
     controller::bind(&window, &service, runtime.handle());
     controller::apply(&window, &snapshot);
     controller::bind_shutdown(&window, &service, runtime.handle());
-    let _tray = desktop::install(&window, &service, runtime.handle())?;
+    let tray = desktop::install(&window, &service, runtime.handle())?;
+    let reminder_creation = completion_creation.clone();
     let notice = completion::Host::new(&window, completion_creation);
     notice.update(&snapshot);
+    let reminder = reminder::Host::new(
+        &window,
+        reminder_creation,
+        service.clone(),
+        runtime.handle().clone(),
+    );
+    let _ = tray.set_tooltip(Some(desktop::tooltip(&snapshot)));
     let notice_events = notice.clone();
-    let (weak, api) = (window.as_weak(), service.clone());
+    let reminder_events = reminder.clone();
+    let (weak, api, tray_events) = (window.as_weak(), service.clone(), tray.clone());
     window.on_refresh_state(move || {
         let snapshot = api.state.borrow().clone();
         if let (Some(window), Some(snapshot)) = (weak.upgrade(), snapshot) {
+            log::set_enabled(snapshot.settings.log_enabled);
+            window
+                .global::<Motion>()
+                .set_reduce(platform::system_reduce_motion() || snapshot.settings.reduce_motion);
             if api.visible.load(Ordering::Acquire) {
                 controller::apply(&window, &snapshot);
             }
+            let _ = tray_events.set_tooltip(Some(desktop::tooltip(&snapshot)));
             notice_events.update(&snapshot);
+            reminder_events.update(&snapshot);
         }
     });
     about::install(&window);
@@ -161,6 +180,9 @@ fn run_with_startup(startup: platform::Startup) -> Result<(), Box<dyn std::error
                     pending.store(false, Ordering::Release);
                     window.invoke_refresh_state();
                 }).is_err() { break; }
+            }
+            if let (Some(previous), Some(next)) = (previous.as_deref(), next.as_deref()) {
+                log::transitions(previous, next);
             }
             previous = next;
             last = tokio::time::Instant::now();

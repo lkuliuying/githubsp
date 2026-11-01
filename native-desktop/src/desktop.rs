@@ -1,6 +1,9 @@
-use crate::{service::Service, MainWindow};
+use crate::{service::Service, MainWindow, Workspace};
 use slint::{winit_030::WinitWindowAccessor, ComponentHandle};
-use std::sync::{atomic::Ordering, Arc};
+use std::{
+    rc::Rc,
+    sync::{atomic::Ordering, Arc},
+};
 use tray_icon::{
     menu::{Menu, MenuEvent, MenuItem},
     MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent,
@@ -10,12 +13,13 @@ pub fn install(
     window: &MainWindow,
     service: &Arc<Service>,
     runtime: &tokio::runtime::Handle,
-) -> Result<TrayIcon, Box<dyn std::error::Error>> {
+) -> Result<Rc<TrayIcon>, Box<dyn std::error::Error>> {
     let menu = Menu::new();
-    let show = MenuItem::with_id("show", "显示主窗口 / 查看提醒", true, None);
+    let show = MenuItem::with_id("show", "显示主窗口", true, None);
+    let updates = MenuItem::with_id("updates", "查看收藏更新", true, None);
     let pause = MenuItem::with_id("pause", "暂停下载与自动恢复", true, None);
     let exit = MenuItem::with_id("exit", "保存进度并退出", true, None);
-    menu.append_items(&[&show, &pause, &exit])?;
+    menu.append_items(&[&show, &updates, &pause, &exit])?;
     let pixels = image::load_from_memory(include_bytes!("../resources/tray.png"))?.into_rgba8();
     let icon = tray_icon::Icon::from_rgba(pixels.to_vec(), pixels.width(), pixels.height())?;
     let tray = TrayIconBuilder::new()
@@ -41,6 +45,12 @@ pub fn install(
     MenuEvent::set_event_handler(Some(move |event: MenuEvent| match event.id.as_ref() {
         "show" => {
             let _ = weak.upgrade_in_event_loop(|window| window.invoke_show_main());
+        }
+        "updates" => {
+            let _ = weak.upgrade_in_event_loop(|window| {
+                window.global::<Workspace>().invoke_navigate(2);
+                window.invoke_show_main();
+            });
         }
         "exit" => {
             let _ = weak.upgrade_in_event_loop(|window| window.invoke_exit());
@@ -129,7 +139,34 @@ pub fn install(
         }
         slint::winit_030::EventResult::Propagate
     });
-    Ok(tray)
+    Ok(Rc::new(tray))
+}
+
+pub fn tooltip(snapshot: &githubsp_lib::model::Snapshot) -> String {
+    let running = snapshot
+        .tasks
+        .iter()
+        .filter(|task| task.status.running())
+        .count();
+    let unread = snapshot
+        .favorites
+        .iter()
+        .filter(|favorite| snapshot.watch_state.is_unread(favorite))
+        .count();
+    let mut text = format!("GitHubSP · {running} 个下载中");
+    if unread > 0 {
+        text.push_str(&format!(" · {unread} 个收藏有更新"));
+    }
+    if snapshot.api_status.source.as_deref() == Some("atom") {
+        text.push_str(" · 更新源已降级");
+    } else if snapshot
+        .api_status
+        .remaining
+        .is_some_and(|remaining| remaining < 10)
+    {
+        text.push_str(" · API 配额偏低");
+    }
+    text
 }
 
 pub fn hwnd(window: &slint::Window) -> Option<windows_sys::Win32::Foundation::HWND> {

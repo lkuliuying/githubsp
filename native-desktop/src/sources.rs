@@ -27,11 +27,103 @@ struct State {
     selected: Vec<String>,
     release_id: Option<u64>,
     preview: Option<BatchPreview>,
+    platform: i32,
+    auto_match: bool,
+    notes_visible: bool,
+}
+
+const PLATFORM_WINDOWS: i32 = 1;
+const PLATFORM_MACOS: i32 = 2;
+const PLATFORM_LINUX: i32 = 3;
+
+fn current_platform() -> i32 {
+    if cfg!(windows) {
+        PLATFORM_WINDOWS
+    } else if cfg!(target_os = "macos") {
+        PLATFORM_MACOS
+    } else {
+        PLATFORM_LINUX
+    }
+}
+
+fn platform_name(platform: i32) -> &'static str {
+    match platform {
+        PLATFORM_WINDOWS => "Windows",
+        PLATFORM_MACOS => "macOS",
+        PLATFORM_LINUX => "Linux",
+        _ => "跨平台",
+    }
+}
+
+fn asset_platform(name: &str, hints: &[String]) -> i32 {
+    let lower = name.to_ascii_lowercase();
+    let mut found = 0;
+    for hint in hints {
+        let hint = hint.to_ascii_lowercase();
+        if hint.contains("windows") {
+            found = PLATFORM_WINDOWS;
+        } else if hint.contains("macos") || hint.contains("mac os") {
+            found = PLATFORM_MACOS;
+        } else if hint.contains("linux") {
+            found = PLATFORM_LINUX;
+        }
+    }
+    if found != 0 {
+        return found;
+    }
+    if lower.contains("windows") || lower.ends_with(".exe") || lower.ends_with(".msi") {
+        PLATFORM_WINDOWS
+    } else if lower.contains("macos")
+        || lower.contains("mac os")
+        || lower.contains("darwin")
+        || lower.ends_with(".dmg")
+    {
+        PLATFORM_MACOS
+    } else if lower.contains("linux") || lower.ends_with(".appimage") || lower.ends_with(".deb") {
+        PLATFORM_LINUX
+    } else {
+        0
+    }
+}
+
+fn visible_assets<'a>(
+    state: &State,
+    release: &'a githubsp_lib::catalog::Release,
+) -> Vec<&'a githubsp_lib::catalog::Asset> {
+    release
+        .assets
+        .iter()
+        .filter(|asset| {
+            state.platform == 0 || asset_platform(&asset.name, &asset.hints) == state.platform
+        })
+        .collect()
+}
+
+fn auto_selected(release: &githubsp_lib::catalog::Release, platform: i32) -> Vec<String> {
+    let platform = if platform == 0 {
+        current_platform()
+    } else {
+        platform
+    };
+    release
+        .assets
+        .iter()
+        .filter(|asset| asset.unavailable.is_none())
+        .filter(|asset| asset_platform(&asset.name, &asset.hints) == platform)
+        .take(100)
+        .map(|asset| asset.url.clone())
+        .collect()
+}
+
+fn notes_blocks(notes: &str) -> Vec<crate::NoteBlock> {
+    crate::notes::render(notes)
 }
 
 fn render(window: &MainWindow, state: &State) {
     let ui = window.global::<Sources>();
     ui.set_loaded(state.page.is_some());
+    ui.set_platform_filter(state.platform);
+    ui.set_auto_match(state.auto_match);
     if let Some(page) = &state.page {
         ui.set_page(page.page as i32);
         ui.set_has_more(page.has_more);
@@ -42,13 +134,16 @@ fn render(window: &MainWindow, state: &State) {
                     id: r.id.to_string().into(),
                     tag: r.tag.as_str().into(),
                     detail: format!(
-                        "{} · {} 个附件",
+                        "{} · {} 个附件{}",
                         if r.prerelease {
                             "预发布"
                         } else {
                             "正式版"
                         },
-                        r.assets.len()
+                        r.assets.len(),
+                        r.published_at
+                            .map(|at| format!(" · {}", crate::system_actions::date(Some(at))))
+                            .unwrap_or_default()
                     )
                     .into(),
                 })
@@ -62,28 +157,36 @@ fn render(window: &MainWindow, state: &State) {
             ui.set_selected_release(release.id.to_string().into());
             ui.set_release_title(format!("发布版本：{}", release.tag).into());
             ui.set_release_description(
-                format!("{} 个附件 · 请确认平台和架构", release.assets.len()).into(),
+                format!(
+                    "{} 个附件 · 请确认平台和架构{}",
+                    release.assets.len(),
+                    release
+                        .published_at
+                        .map(|at| format!(" · 发布于 {}", crate::system_actions::date(Some(at))))
+                        .unwrap_or_default()
+                )
+                .into(),
             );
+            ui.set_notes(model(notes_blocks(&release.notes)));
+            ui.set_notes_visible(state.notes_visible && !release.notes.trim().is_empty());
+            let assets = visible_assets(state, release);
             ui.set_assets(model(
-                release
-                    .assets
+                assets
                     .iter()
                     .map(|a| AssetRow {
                         url: a.url.as_str().into(),
                         name: a.name.as_str().into(),
                         size: presentation::bytes(a.size).into(),
-                        detail: a
-                            .unavailable
-                            .as_ref()
-                            .cloned()
-                            .unwrap_or_else(|| {
-                                if a.hints.is_empty() {
-                                    "其他附件".into()
-                                } else {
-                                    a.hints.join(" · ")
-                                }
-                            })
-                            .into(),
+                        detail: {
+                            let platform = platform_name(asset_platform(&a.name, &a.hints));
+                            let hints = if a.hints.is_empty() {
+                                "其他附件".to_string()
+                            } else {
+                                a.hints.join(" · ")
+                            };
+                            format!("{platform} · {hints}")
+                        }
+                        .into(),
                         unavailable: a.unavailable.is_some(),
                         selected: state.selected.contains(&a.url),
                     })
@@ -94,12 +197,16 @@ fn render(window: &MainWindow, state: &State) {
             ui.set_release_title("版本附件".into());
             ui.set_release_description("此页暂无符合条件的版本".into());
             ui.set_assets(model(vec![]));
+            ui.set_notes(model(vec![]));
+            ui.set_notes_visible(false);
         }
     } else {
         ui.set_releases(model(vec![]));
         ui.set_assets(model(vec![]));
         ui.set_release_title("版本附件".into());
         ui.set_release_description("选择版本后，附件会显示在这里".into());
+        ui.set_notes(model(vec![]));
+        ui.set_notes_visible(false);
     }
     ui.set_selected_count(state.selected.len() as i32);
     let selected_size = state.selected.iter().try_fold(0u64, |total, url| {
@@ -266,7 +373,14 @@ pub fn bind(
     runtime: &tokio::runtime::Handle,
     inputs: &Inputs,
 ) {
-    let state = Arc::new(Mutex::new(State::default()));
+    let state = Arc::new(Mutex::new(State {
+        auto_match: api
+            .state
+            .borrow()
+            .as_ref()
+            .is_none_or(|snapshot| snapshot.settings.auto_match_platform),
+        ..State::default()
+    }));
     {
         let (weak, state, inputs) = (window.as_weak(), state.clone(), inputs.clone());
         window.global::<Sources>().on_edited(move || {
@@ -354,6 +468,19 @@ pub fn bind(
                         state.selected = page.selected_url.iter().cloned().collect();
                         state.preview = None;
                         state.page = Some(page);
+                        if state.selected.is_empty() && state.auto_match {
+                            let assets = state
+                                .page
+                                .as_ref()
+                                .and_then(|page| {
+                                    page.releases
+                                        .iter()
+                                        .find(|release| Some(release.id) == state.release_id)
+                                })
+                                .map(|release| auto_selected(release, state.platform))
+                                .unwrap_or_default();
+                            state.selected = assets;
+                        }
                         render(window, &state);
                     }
                     Err(_) => window
@@ -421,6 +548,118 @@ pub fn bind(
                     }
                 }
             });
+    }
+    {
+        let (weak, state) = (window.as_weak(), state.clone());
+        window.global::<Sources>().on_platform_changed(move || {
+            if let Some(window) = weak.upgrade() {
+                let ui = window.global::<Sources>();
+                match state.lock() {
+                    Ok(mut state) => {
+                        state.platform = ui.get_platform_filter();
+                        if state.auto_match {
+                            let assets = state
+                                .page
+                                .as_ref()
+                                .and_then(|page| {
+                                    page.releases
+                                        .iter()
+                                        .find(|release| Some(release.id) == state.release_id)
+                                })
+                                .map(|release| auto_selected(release, state.platform))
+                                .unwrap_or_default();
+                            state.selected = assets;
+                        }
+                        state.preview = None;
+                        render(&window, &state);
+                    }
+                    Err(_) => ui.set_message("附件状态无法访问".into()),
+                }
+            }
+        });
+    }
+    {
+        let (weak, state) = (window.as_weak(), state.clone());
+        window.global::<Sources>().on_auto_match_now(move || {
+            if let Some(window) = weak.upgrade() {
+                match state.lock() {
+                    Ok(mut state) => {
+                        state.auto_match = true;
+                        state.platform = current_platform();
+                        let assets = state
+                            .page
+                            .as_ref()
+                            .and_then(|page| {
+                                page.releases
+                                    .iter()
+                                    .find(|release| Some(release.id) == state.release_id)
+                            })
+                            .map(|release| auto_selected(release, state.platform))
+                            .unwrap_or_default();
+                        state.selected = assets;
+                        state.preview = None;
+                        render(&window, &state);
+                    }
+                    Err(_) => window.set_message("附件状态无法访问".into()),
+                }
+            }
+        });
+    }
+    {
+        let (weak, state) = (window.as_weak(), state.clone());
+        window.global::<Sources>().on_select_all(move |select| {
+            if let Some(window) = weak.upgrade() {
+                match state.lock() {
+                    Ok(mut state) => {
+                        let visible: Vec<String> = state
+                            .page
+                            .as_ref()
+                            .and_then(|page| {
+                                page.releases
+                                    .iter()
+                                    .find(|release| Some(release.id) == state.release_id)
+                            })
+                            .map(|release| {
+                                visible_assets(&state, release)
+                                    .into_iter()
+                                    .filter(|asset| asset.unavailable.is_none())
+                                    .map(|asset| asset.url.clone())
+                                    .collect()
+                            })
+                            .unwrap_or_default();
+                        if select {
+                            for url in visible {
+                                if state.selected.len() >= 100 {
+                                    break;
+                                }
+                                if !state.selected.contains(&url) {
+                                    state.selected.push(url);
+                                }
+                            }
+                        } else {
+                            state.selected.retain(|url| !visible.contains(url));
+                        }
+                        state.preview = None;
+                        render(&window, &state);
+                    }
+                    Err(_) => window.set_message("附件状态无法访问".into()),
+                }
+            }
+        });
+    }
+    {
+        let (weak, state) = (window.as_weak(), state.clone());
+        window.global::<Sources>().on_toggle_notes(move || {
+            if let Some(window) = weak.upgrade() {
+                match state.lock() {
+                    Ok(mut state) => {
+                        state.notes_visible = !state.notes_visible;
+                        render(&window, &state);
+                    }
+                    Err(_) => window.set_message("附件状态无法访问".into()),
+                }
+            }
+        });
     }
     {
         let (weak, state, api, runtime, inputs) = (
