@@ -1,5 +1,25 @@
 # 界面设计与验收
 
+## 2026-11-01：v0.3.0 发布验收
+
+final result: passed（构建、依赖与导入静态审计、摘要三方一致、中文隔离目录启动；干净系统、真实网络与多档 DPI 未覆盖）
+
+v0.3.0 在 v0.2.8 基线 `c9afc06` 之上按 core、desktop、ui、docs、release 五个提交整理并推送，标签 `v0.3.0` 指向发布提交。数据库结构、依赖版本和历史标签未变，`artifacts/` 不进源码包。
+
+| 实际命令或检查 | 结果 |
+| --- | --- |
+| `.\scripts\native-cargo.ps1 -CargoArguments @('test','--workspace','--locked','--offline')` | 核心 125 通过；桌面 24 通过、2 项按既有约定忽略；文档测试 0。日志 `workspace-tests.log`。 |
+| clippy `--workspace --all-targets -- -D warnings`、`cargo fmt --all -- --check`、`git diff --check` | 通过，日志 `clippy.log`、`fmt.log`、`diff-check.log`。 |
+| `.\scripts\package-native-windows.ps1 -Offline -OutputDirectory 'artifacts/releases/v0.3.0'` | 通过；280 个运行依赖节点声明与 v0.2.8 一致，静态 CRT、依赖树与 PE 导入审计无 WebView2、VC++ 运行库、Node、Python 或 OpenSSL。 |
+| `.\scripts\test-native-startup.ps1 -Executable '.\artifacts\releases\v0.3.0\GitHubSP-v0.3.0-windows-x64.exe'` | 中文隔离目录启动，窗口与数据库 962 ms、私有字节 235.98 MB；主窗口、第二实例退出与正常保存退出通过，模块快照无异常项。 |
+| dumpbin `/headers`、`Get-AuthenticodeSignature`、`Get-FileHash` | x64、Windows GUI 子系统；未签名（NotSigned）；exe 57,422,336 字节，SHA-256 与 `SHA256SUMS.txt`、`acceptance.json` 三方一致。 |
+
+发布资产为 `GitHubSP-v0.3.0-windows-x64.exe`（SHA-256 `B3DF1D9D80B67C7A5645A1C9D6B41D2B54CE8FDF3D91E0D521B65C7BE05C8090`）、`GitHubSP-v0.3.0-source.zip`、`LICENSE`、`THIRD_PARTY_NOTICES.txt` 和 `SHA256SUMS.txt`；源码包由标签导出并逐条比对 blob，拒绝编译缓存、数据库与日志。发布截图共 148 张，位于 `artifacts/releases/v0.3.0/audit/ui-renders/`。
+
+未覆盖：干净 Windows 离线启动、中文输入法、100%/150%/200% DPI、多显示器与提醒不抢焦点、真实网络完整下载回归、DX12 帧率与完整进程树资源基准。回下载比对和公开链接校验记录在 `artifacts/releases/v0.3.0/audit/`。
+
+---
+
 ## 2026-10-26：收藏页磁吸高亮与微交互
 
 自动检查：桌面测试、Clippy、格式与差异检查通过；原生连续操作与帧率未验证。
