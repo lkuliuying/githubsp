@@ -69,9 +69,25 @@ pub async fn preview(
             message: None,
             task_id: None,
         };
-        match catalog.resolve(&input).await {
-            Ok((url, asset)) => {
-                item.filename = Some(parse_release_url(&url)?.filename);
+        let direct = parse_release_url(&input)
+            .ok()
+            .map(|source| (source.url.to_string(), source.filename));
+        let resolved = match direct {
+            Some((url, filename)) => {
+                // 直链不再等待 API 补全元数据：文件名可本地解析，大小交给下载探测。
+                Ok((url, None, Some(filename)))
+            }
+            None => catalog
+                .resolve(&input)
+                .await
+                .map(|(url, asset)| (url, asset, None)),
+        };
+        match resolved {
+            Ok((url, asset, direct_filename)) => {
+                item.filename = match direct_filename {
+                    Some(filename) => Some(filename),
+                    None => Some(parse_release_url(&url)?.filename),
+                };
                 item.size = asset.map(|a| a.size);
                 let existing = snapshot.tasks.iter().find(|t| {
                     parse_release_url(&t.url).is_ok_and(|s| s.url.as_str() == url)
@@ -129,7 +145,21 @@ pub async fn create_batch(
     let mut items = Vec::new();
     for input in urls {
         let result = async {
-            let (url, asset) = catalog.resolve(&input).await?;
+            let direct = parse_release_url(&input).ok();
+            let (url, asset) = match direct {
+                Some(source) => {
+                    let asset = tokio::time::timeout(
+                        std::time::Duration::from_secs(2),
+                        catalog.resolve(&input),
+                    )
+                    .await
+                    .ok()
+                    .and_then(Result::ok)
+                    .and_then(|(_, asset)| asset);
+                    (source.url.to_string(), asset)
+                }
+                None => catalog.resolve(&input).await?,
+            };
             let options = CreateOptions {
                 asset_id: asset.as_ref().map(|a| a.id),
                 size: asset.as_ref().map(|a| a.size),

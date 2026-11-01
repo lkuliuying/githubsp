@@ -3,9 +3,9 @@ use crate::{
     error::{DownloadError, ErrorKind, Result},
     files::Workspace,
     model::{
-        now_ms, CreateOptions, DiagnosticContext, DiagnosticSource, DownloadedFile, EngineUpdate,
-        NoticeKind, RouteReport, Settings, Snapshot, StoredTask, Task, TaskDetails, TaskStatus,
-        Verification,
+        now_ms, ApiStatus, CheckProgress, CreateOptions, DiagnosticContext, DiagnosticSource,
+        DownloadedFile, EngineUpdate, Favorite, NoticeKind, RouteReport, Settings, Snapshot,
+        StoredTask, Task, TaskDetails, TaskStatus, Verification, WatchEntry, WatchRule, WatchState,
     },
     source::{parse_release_url, ReleaseSource},
     store::Store,
@@ -107,6 +107,9 @@ mod diagnostic_tests {
             token: CancellationToken::new(),
             notices: Vec::new(),
             favorites: Vec::new(),
+            watch_state: WatchState::default(),
+            checking: CheckProgress::default(),
+            api_status: ApiStatus::default(),
             route_ux: RouteRuntime::new(RoutePolicy::default()),
         }
     }
@@ -276,6 +279,11 @@ enum Operation {
     AddFavorite(String),
     RemoveFavorite(String),
     UpdateFavorite(crate::model::Favorite, bool),
+    WatchUpdate(crate::model::Favorite, WatchEntry, bool),
+    AckWatch(Option<String>),
+    WatchRule(String, WatchRule),
+    CheckProgress(CheckProgress),
+    ApiStatus(ApiStatus),
     Action(String, Action),
     RemoveCompleted(u64),
     Shutdown,
@@ -306,6 +314,29 @@ impl Manager {
         let last_directory = store.last_directory()?;
         let settings = store.settings()?;
         let favorites = store.favorites()?;
+        let mut watch_state: WatchState = match store.get_json("watch_state") {
+            Ok(value) => value.unwrap_or_default(),
+            Err(error) => {
+                eprintln!("关注状态读取失败，使用空状态：{error}");
+                WatchState::default()
+            }
+        };
+        // 从旧版升级时 latest 已存在但没有 watch_state：把既有版本视为已读，避免首次启动全量弹窗。
+        let mut migrated = false;
+        for favorite in &favorites {
+            let Some(latest) = favorite.latest.as_ref() else {
+                continue;
+            };
+            let entry = watch_state.entry_mut(&favorite.repository);
+            if entry.acked_release_id.is_none() {
+                entry.acked_release_id = Some(latest.id);
+                entry.notified_release_id.get_or_insert(latest.id);
+                migrated = true;
+            }
+        }
+        if migrated {
+            store.set_json("watch_state", &watch_state)?;
+        }
         engine.limiter.set(settings.limit_kib);
         let mut diagnostics: Vec<RouteReport> = store.get_json("diagnostics")?.unwrap_or_default();
         for route in &engine.network.routes {
@@ -347,6 +378,9 @@ impl Manager {
             token: token.clone(),
             notices: Vec::new(),
             favorites,
+            watch_state,
+            checking: CheckProgress::default(),
+            api_status: ApiStatus::default(),
             route_ux: RouteRuntime::new(policy),
         };
         tokio::spawn(actor.run());
@@ -461,6 +495,28 @@ impl Manager {
         self.request(Operation::UpdateFavorite(favorite, notify))
             .await
     }
+    /// 检查完成后原子写入收藏与关注状态。
+    pub async fn update_watch(
+        &self,
+        favorite: Favorite,
+        entry: WatchEntry,
+        notify: bool,
+    ) -> Result<Snapshot> {
+        self.request(Operation::WatchUpdate(favorite, entry, notify))
+            .await
+    }
+    pub async fn ack_watch(&self, repository: Option<String>) -> Result<Snapshot> {
+        self.request(Operation::AckWatch(repository)).await
+    }
+    pub async fn watch_rule(&self, repository: String, rule: WatchRule) -> Result<Snapshot> {
+        self.request(Operation::WatchRule(repository, rule)).await
+    }
+    pub async fn checking(&self, progress: CheckProgress) -> Result<Snapshot> {
+        self.request(Operation::CheckProgress(progress)).await
+    }
+    pub async fn api_status(&self, status: ApiStatus) -> Result<Snapshot> {
+        self.request(Operation::ApiStatus(status)).await
+    }
     pub async fn route(
         &self,
         id: String,
@@ -566,6 +622,9 @@ struct Actor {
     token: CancellationToken,
     notices: Vec<crate::model::Notice>,
     favorites: Vec<crate::model::Favorite>,
+    watch_state: WatchState,
+    checking: CheckProgress,
+    api_status: ApiStatus,
     route_ux: RouteRuntime,
 }
 
@@ -737,6 +796,9 @@ impl Actor {
             diagnosing: self.diagnostic.is_some(),
             notices: self.notices.clone(),
             favorites: self.favorites.clone(),
+            watch_state: self.watch_state.clone(),
+            checking: self.checking.clone(),
+            api_status: self.api_status.clone(),
         }
     }
 
@@ -922,10 +984,31 @@ impl Actor {
                 self.store.remove_favorite(&repository).map(|()| {
                     self.favorites
                         .retain(|f| !f.repository.eq_ignore_ascii_case(&repository));
+                    self.watch_state
+                        .repositories
+                        .remove(&repository.to_ascii_lowercase());
+                    if let Err(error) = self.store.set_json("watch_state", &self.watch_state) {
+                        eprintln!("关注状态保存失败：{error}");
+                    }
                     self.publish();
                 })
             }
             Operation::UpdateFavorite(favorite, notify) => self.update_favorite(favorite, notify),
+            Operation::WatchUpdate(favorite, entry, notify) => {
+                self.update_watch(favorite, entry, notify)
+            }
+            Operation::AckWatch(repository) => self.ack_watch(repository),
+            Operation::WatchRule(repository, rule) => self.set_watch_rule(&repository, rule),
+            Operation::CheckProgress(progress) => {
+                self.checking = progress;
+                self.publish();
+                Ok(())
+            }
+            Operation::ApiStatus(status) => {
+                self.api_status = status;
+                self.publish();
+                Ok(())
+            }
             Operation::Action(id, action) => self.action(&id, action),
             Operation::RemoveCompleted(revision) => self.clear_completed(revision),
             _ => Ok(()),
@@ -1162,12 +1245,29 @@ impl Actor {
         Ok(())
     }
     fn update_favorite(&mut self, favorite: crate::model::Favorite, notify: bool) -> Result<()> {
+        let entry = self
+            .watch_state
+            .entry(&favorite.repository)
+            .cloned()
+            .unwrap_or_default();
+        self.update_watch(favorite, entry, notify)
+    }
+
+    fn update_watch(
+        &mut self,
+        favorite: crate::model::Favorite,
+        mut entry: WatchEntry,
+        notify: bool,
+    ) -> Result<()> {
         let Some(index) = self.favorites.iter().position(|f| f.id == favorite.id) else {
             return Ok(());
         };
-        self.store.save_favorite(&favorite)?;
-        if notify {
-            if let Some(latest) = &favorite.latest {
+        let latest = favorite.latest.as_ref();
+        if notify && self.settings.watch_notifications {
+            if let Some(latest) =
+                latest.filter(|latest| entry.notified_release_id != Some(latest.id))
+            {
+                entry.notified_release_id = Some(latest.id);
                 self.add_notice(
                     NoticeKind::FavoriteUpdated,
                     None,
@@ -1175,7 +1275,65 @@ impl Actor {
                 );
             }
         }
+        self.store.save_favorite(&favorite)?;
+        self.watch_state
+            .repositories
+            .insert(favorite.repository.to_ascii_lowercase(), entry);
+        self.store.set_json("watch_state", &self.watch_state)?;
         self.favorites[index] = favorite;
+        self.publish();
+        Ok(())
+    }
+
+    fn ack_watch(&mut self, repository: Option<String>) -> Result<()> {
+        let mut changed = false;
+        for favorite in &self.favorites {
+            if repository
+                .as_ref()
+                .is_some_and(|repo| !favorite.repository.eq_ignore_ascii_case(repo))
+            {
+                continue;
+            }
+            let Some(latest) = favorite.latest.as_ref() else {
+                continue;
+            };
+            let entry = self.watch_state.entry_mut(&favorite.repository);
+            if entry.acked_release_id != Some(latest.id) {
+                entry.acked_release_id = Some(latest.id);
+                changed = true;
+            }
+            if entry.notified_release_id.is_none() {
+                entry.notified_release_id = Some(latest.id);
+                changed = true;
+            }
+        }
+        if changed {
+            self.store.set_json("watch_state", &self.watch_state)?;
+            self.publish();
+        }
+        Ok(())
+    }
+
+    fn set_watch_rule(&mut self, repository: &str, rule: WatchRule) -> Result<()> {
+        if rule
+            .asset_pattern
+            .as_ref()
+            .is_some_and(|pattern| pattern.len() > 200)
+        {
+            return Err(DownloadError::new(
+                ErrorKind::InvalidInput,
+                "附件匹配规则过长，请控制在 200 个字符内",
+            ));
+        }
+        if !self
+            .favorites
+            .iter()
+            .any(|f| f.repository.eq_ignore_ascii_case(repository))
+        {
+            return Err(DownloadError::new(ErrorKind::NotFound, "收藏项目不存在"));
+        }
+        self.watch_state.entry_mut(repository).rule = rule;
+        self.store.set_json("watch_state", &self.watch_state)?;
         self.publish();
         Ok(())
     }
@@ -1186,12 +1344,42 @@ impl Actor {
                 "下载限速超出允许范围，请输入 0（不限速）或 0.001024 至 10240 MB/s 之间的数值",
             ));
         }
+        if !Settings::CHECK_INTERVALS_MS.contains(&settings.watch_interval_ms) {
+            return Err(DownloadError::new(
+                ErrorKind::InvalidInput,
+                "检查间隔只支持 15 分钟、1 小时、6 小时或 24 小时",
+            ));
+        }
+        if settings.watch_asset_mode > 2 {
+            return Err(DownloadError::new(
+                ErrorKind::InvalidInput,
+                "自动下载附件模式无效",
+            ));
+        }
+        if settings.watch_asset_pattern.len() > 200 {
+            return Err(DownloadError::new(
+                ErrorKind::InvalidInput,
+                "附件匹配规则过长，请控制在 200 个字符内",
+            ));
+        }
+        let interval_changed = settings.watch_interval_ms != self.settings.watch_interval_ms;
         self.store.set_json("preferences", &settings)?;
         self.engine.limiter.set(settings.limit_kib);
         if settings.limit_kib != 0 {
             self.cancel_suggestion("下载限速已启用，本次换线未执行");
             for record in &mut self.records {
                 record.task.details.route_suggestion = None;
+            }
+        }
+        if interval_changed {
+            let now = now_ms();
+            for favorite in &mut self.favorites {
+                if favorite.error.is_none() {
+                    favorite.next_check = Some(now.saturating_add(settings.watch_interval_ms));
+                    if let Err(error) = self.store.save_favorite(favorite) {
+                        eprintln!("收藏检查计划更新失败：{error}");
+                    }
+                }
             }
         }
         self.settings = settings;

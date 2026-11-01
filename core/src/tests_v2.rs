@@ -1,5 +1,5 @@
 use crate::{
-    model::Settings,
+    model::{Favorite, ReleaseSummary, Settings, WatchState},
     preflight,
     source::{parse_resource, Resource},
     store::Store,
@@ -391,7 +391,9 @@ async fn batch_preview_partial_creation_and_favorites() {
         ReleaseSummary {
             id: 10,
             tag: "v1.2.0".into(),
-            url: "page".into()
+            url: "page".into(),
+            published_at: None,
+            atom: false
         }
     ));
     assert!(crate::library::apply_release(
@@ -399,7 +401,9 @@ async fn batch_preview_partial_creation_and_favorites() {
         ReleaseSummary {
             id: 11,
             tag: "v1.3.0".into(),
-            url: "page".into()
+            url: "page".into(),
+            published_at: None,
+            atom: false
         }
     ));
     assert!(!crate::library::apply_release(
@@ -407,7 +411,9 @@ async fn batch_preview_partial_creation_and_favorites() {
         ReleaseSummary {
             id: 10,
             tag: "v1.2.0".into(),
-            url: "page".into()
+            url: "page".into(),
+            published_at: None,
+            atom: false
         }
     ));
     let id = favorite.id.clone();
@@ -639,4 +645,53 @@ async fn application_update_asset_enters_existing_queue_with_duplicate_protectio
         .contains("相同下载任务"));
     assert_eq!(duplicate.snapshot.tasks.len(), 1);
     manager.shutdown().await.unwrap();
+}
+
+#[test]
+fn watch_state_roundtrips_in_settings_key_and_derives_unread() {
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("tasks.sqlite3");
+    let mut state = WatchState::default();
+    let entry = state.entry_mut("Owner/Repo");
+    entry.acked_release_id = Some(1);
+    entry.rule.auto_download = true;
+    entry.rule.asset_pattern = Some("*-windows-*.exe".into());
+    Store::open(&path)
+        .unwrap()
+        .set_json("watch_state", &state)
+        .unwrap();
+    let reopened = Store::open(&path).unwrap();
+    assert_eq!(
+        reopened.get_json::<WatchState>("watch_state").unwrap(),
+        Some(state)
+    );
+    let favorite = Favorite {
+        id: "f".into(),
+        repository: "owner/repo".into(),
+        latest: Some(ReleaseSummary {
+            id: 2,
+            tag: "v2".into(),
+            url: "https://github.com/owner/repo/releases/tag/v2".into(),
+            published_at: None,
+            atom: false,
+        }),
+        seen: vec![1],
+        last_checked: None,
+        last_success: None,
+        next_check: None,
+        error: None,
+    };
+    let mut read = reopened
+        .get_json::<WatchState>("watch_state")
+        .unwrap()
+        .unwrap();
+    assert!(read.is_unread(&favorite));
+    read.entry_mut("owner/repo").acked_release_id = Some(2);
+    reopened.set_json("watch_state", &read).unwrap();
+    let restarted = Store::open(&path).unwrap();
+    let restored = restarted
+        .get_json::<WatchState>("watch_state")
+        .unwrap()
+        .unwrap();
+    assert!(!restored.is_unread(&favorite));
 }

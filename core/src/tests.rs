@@ -620,6 +620,7 @@ async fn v2_queue_order_settings_history_and_notifications() {
             close_to_tray: true,
             auto_check: false,
             background_completion_notice: true,
+            ..Default::default()
         })
         .await
         .unwrap();

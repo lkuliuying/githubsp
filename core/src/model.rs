@@ -155,6 +155,12 @@ pub struct Snapshot {
     pub diagnosing: bool,
     pub notices: Vec<Notice>,
     pub favorites: Vec<Favorite>,
+    #[serde(default)]
+    pub watch_state: WatchState,
+    #[serde(default)]
+    pub checking: CheckProgress,
+    #[serde(default)]
+    pub api_status: ApiStatus,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -282,6 +288,31 @@ pub struct Settings {
     pub close_to_tray: bool,
     pub auto_check: bool,
     pub background_completion_notice: bool,
+    /// 自动检查间隔，单位毫秒；只接受 [`Settings::CHECK_INTERVALS_MS`] 中的值。
+    pub watch_interval_ms: u64,
+    /// 发现新版本时是否弹窗、写托盘提示。
+    pub watch_notifications: bool,
+    /// 全局自动下载开关；单个收藏仍可通过关注规则覆盖。
+    pub watch_auto_download: bool,
+    /// 检查时是否把预发布版本纳入发现。
+    pub watch_include_prerelease: bool,
+    /// 自动下载附件模式：0 优先安装包，1 全部附件，2 不下载附件。
+    pub watch_asset_mode: u8,
+    /// 可选的附件名通配符，如 `*win*x64*.exe`。
+    pub watch_asset_pattern: String,
+    /// 是否写入本地日志文件。
+    pub log_enabled: bool,
+    /// 减少界面动效；系统关闭动画时也会生效。
+    pub reduce_motion: bool,
+    /// 打开版本页时按当前平台自动勾选附件。
+    pub auto_match_platform: bool,
+}
+
+impl Settings {
+    /// 6 小时，保持旧版本行为。
+    pub const DEFAULT_WATCH_INTERVAL_MS: u64 = 6 * 60 * 60 * 1000;
+    /// 15 分钟 / 1 小时 / 6 小时 / 24 小时。
+    pub const CHECK_INTERVALS_MS: [u64; 4] = [900_000, 3_600_000, 21_600_000, 86_400_000];
 }
 
 impl Default for Settings {
@@ -291,6 +322,15 @@ impl Default for Settings {
             close_to_tray: false,
             auto_check: false,
             background_completion_notice: true,
+            watch_interval_ms: Self::DEFAULT_WATCH_INTERVAL_MS,
+            watch_notifications: true,
+            watch_auto_download: false,
+            watch_include_prerelease: false,
+            watch_asset_mode: 0,
+            watch_asset_pattern: String::new(),
+            log_enabled: true,
+            reduce_motion: false,
+            auto_match_platform: true,
         }
     }
 }
@@ -350,4 +390,102 @@ pub struct ReleaseSummary {
     pub id: u64,
     pub tag: String,
     pub url: String,
+    #[serde(default)]
+    pub published_at: Option<u64>,
+    /// 来自 Atom 降级发现，附件需重新查询 API。
+    #[serde(default)]
+    pub atom: bool,
+}
+
+/// 单个收藏仓库的关注选项。
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct WatchRule {
+    /// 新版本是否包含 GitHub 预发布版本。
+    pub include_prerelease: bool,
+    /// 命中新版本后自动把匹配附件加入下载队列（仅在“自动检查”开启时生效）。
+    pub auto_download: bool,
+    /// 自动下载的附件名匹配：精确、`prefix*`、`*suffix` 或 `*contains*`，不区分大小写。
+    pub asset_pattern: Option<String>,
+}
+
+/// 收藏仓库的未读与已提醒状态，独立于 `Favorite` 持久化，避免旧数据库迁移。
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct WatchEntry {
+    /// 最近一次被用户在当前主窗口确认过的版本 ID。
+    pub acked_release_id: Option<u64>,
+    /// 最近一次已弹窗/写托盘提示的版本 ID。
+    pub notified_release_id: Option<u64>,
+    /// 最近一次自动下载的附件标识（asset id 或附件名），防止重复入队。
+    pub last_downloaded_asset: Option<String>,
+    pub published_at: Option<u64>,
+    pub notes_excerpt: Option<String>,
+    /// 连续失败次数，用于指数退避。
+    pub failures: u32,
+    pub rule: WatchRule,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct WatchState {
+    /// 当前 schema；未知更高版本原样保留。
+    pub schema: u32,
+    /// key 为小写 `owner/repo`。
+    pub repositories: std::collections::BTreeMap<String, WatchEntry>,
+}
+
+impl Default for WatchState {
+    fn default() -> Self {
+        Self {
+            schema: 1,
+            repositories: std::collections::BTreeMap::new(),
+        }
+    }
+}
+
+impl WatchState {
+    pub fn entry(&self, repository: &str) -> Option<&WatchEntry> {
+        self.repositories.get(&repository.to_ascii_lowercase())
+    }
+
+    pub fn entry_mut(&mut self, repository: &str) -> &mut WatchEntry {
+        self.repositories
+            .entry(repository.to_ascii_lowercase())
+            .or_default()
+    }
+
+    pub fn is_unread(&self, favorite: &Favorite) -> bool {
+        match (&favorite.latest, self.entry(&favorite.repository)) {
+            (Some(latest), Some(entry)) => entry.acked_release_id != Some(latest.id),
+            (Some(_), None) => true,
+            (None, _) => false,
+        }
+    }
+}
+
+/// 一轮收藏检查的进度；由 Manager 持久化到内存快照并广播。
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct CheckProgress {
+    pub active: bool,
+    pub total: u32,
+    pub done: u32,
+    pub current: Option<String>,
+    pub cancelled: bool,
+    pub finished_at: Option<u64>,
+}
+
+/// GitHub API 配额与降级状态。
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct ApiStatus {
+    pub remaining: Option<u32>,
+    pub limit: Option<u32>,
+    /// Unix 毫秒；GitHub 的 `X-RateLimit-Reset` 是秒。
+    pub reset_at: Option<u64>,
+    /// 最近一次成功调用使用的路径：`api` 或 `atom`。
+    pub source: Option<String>,
+    pub updated_at: Option<u64>,
+    pub error: Option<String>,
 }
