@@ -18,6 +18,8 @@ if ($null -ne $nativeOriginal -or $null -ne $nativeRaw) {
     throw '检测到自定义 Rust 编译参数，请在无自定义参数的进程中运行，以免覆盖静态 CRT 设置。'
 }
 $nativeArgs = $nativePrefix + @('--manifest-path', (Join-Path $nativeRoot 'Cargo.toml'), '--target', 'x86_64-pc-windows-msvc')
+# 默认桌面入口已迁移到 Tauri；此历史脚本仍明确验证 Slint 包。
+if (-not ($nativePrefix | Where-Object { $_ -match '^(-p|--package|--workspace|--all)(=|$)' })) { $nativeArgs += @('--package', 'githubsp-native') }
 if ($CargoArguments[0] -ne 'tree') { $nativeArgs += @('--target-dir', (Join-Path $nativeRoot 'native-desktop\target')) }
 $nativeArgs += $nativeSuffix
 try {

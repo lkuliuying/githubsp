@@ -6,6 +6,10 @@ rust-version.workspace = true
 license.workspace = true
 description = "GitHubSP 原生桌面下载工作台"
 
+[features]
+# 仅自动化预览测试启用，正式便携程序不包含 MCP 调试服务。
+automation-mcp = ["slint/mcp"]
+
 [dependencies]
 githubsp_lib = { package = "githubsp-core", path = "../core" }
 slint = { version = "=1.18.1", default-features = false, features = ["std", "backend-winit", "renderer-femtovg-wgpu", "compat-1-2", "accessibility", "unstable-winit-030", "unstable-wgpu-30"] }

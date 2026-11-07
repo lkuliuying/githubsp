@@ -5,6 +5,7 @@ src-tauri/target/
 native-desktop/target/
 target/
 src-tauri/gen/
+desktop/src-tauri/gen/
 artifacts/
 test-results/
 *.log

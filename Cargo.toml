@@ -1,6 +1,6 @@
 [workspace]
-members = ["core", "native-desktop"]
-default-members = ["native-desktop"]
+members = ["core", "native-desktop", "desktop/src-tauri"]
+default-members = ["desktop/src-tauri"]
 resolver = "2"
 
 [workspace.package]
