@@ -86,6 +86,10 @@ impl Host {
             main.set_message(format!("更新提醒显示失败：{error}").into());
             return;
         }
+        // 独立提醒窗不共享主窗口全局对象，显示前同步系统与用户合并后的动效偏好。
+        window
+            .global::<crate::Motion>()
+            .set_reduce(main.global::<crate::Motion>().get_reduce());
         window.set_entered(false);
         if let Err(error) = window.show() {
             main.set_message(format!("更新提醒显示失败：{error}").into());

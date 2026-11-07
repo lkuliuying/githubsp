@@ -90,6 +90,7 @@ fn run_with_startup(startup: platform::Startup) -> Result<(), Box<dyn std::error
         .with_winit_window_attributes_hook(move |attributes| creation_hook.attributes(attributes))
         .select()?;
     let window = MainWindow::new()?;
+    presentation::bind_detail_selection(&window);
     let directory = if startup.state.active.is_some() {
         githubsp_lib::relocation::existing_database(&startup.directory)?
     } else {

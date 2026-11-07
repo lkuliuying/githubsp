@@ -1,0 +1,52 @@
+import { Theme, Label, Muted } from "theme.slint";
+import { Motion } from "motion.slint";
+import { TaskRow, HistoryRow } from "state.slint";
+
+// 只从已有展示模型解析稳定 ID，不读取业务状态或持有第二份任务数据。
+export global DetailSelection {
+    pure callback task([TaskRow], string) -> TaskRow;
+    pure callback history([HistoryRow], string) -> HistoryRow;
+}
+
+export component DetailField inherits VerticalLayout {
+    in property <string> title;
+    in property <string> value;
+    spacing: 5px;
+    Muted { text: root.title; font-size: 12px; }
+    Label { text: root.value; font-size: 14px; wrap: char-wrap; }
+}
+
+// 选择命中区在内容父级，内部操作按钮保留自己的点击和键盘事件。
+export component SelectableRow inherits Rectangle {
+    in property <bool> selected;
+    in property <bool> enabled: true;
+    in property <string> description;
+    out property <bool> has-hover: observer.has-hover;
+    out property <bool> has-focus: focus.has-focus;
+    callback choose();
+    forward-focus: focus;
+    accessible-role: button;
+    accessible-label: description;
+    accessible-enabled: enabled;
+    accessible-action-default => { if root.enabled { root.choose(); } }
+    background: selected ? Theme.accent-soft : observer.has-hover ? Theme.subtle : white;
+    animate background { enabled: !Motion.reduce; duration: Motion.fast; }
+    border-radius: Theme.control-radius;
+    border-width: focus.has-focus ? 1px : 0px;
+    border-color: Theme.accent;
+    Rectangle { x: 0px; width: 1px; y: 12px; height: parent.height - 24px; background: root.selected ? Theme.accent : transparent; }
+    focus := FocusScope {
+        enabled: root.enabled;
+        key-pressed(event) => {
+            if event.text == " " || event.text == Key.Return { root.choose(); return accept; }
+            return reject;
+        }
+    }
+    observer := TouchArea {
+        x: 0px; y: 0px; width: root.width; height: root.height;
+        enabled: root.enabled;
+        mouse-cursor: pointer;
+        clicked => { focus.focus(); root.choose(); }
+        @children
+    }
+}

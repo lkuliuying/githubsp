@@ -17,10 +17,17 @@ export global Motion {
     out property <length> reveal-distance: reduce ? 0px : 6px;
     out property <length> card-lift: reduce ? 0px : 2px;
     out property <length> card-press: reduce ? 0px : 1px;
+    out property <duration> navigation: reduce ? 0ms : 220ms;
+    // 强调过渡：弹窗入场、行内操作显隐，介于 base 与 slow 之间。
+    out property <duration> emphasis: reduce ? 0ms : 200ms;
+    out property <length> page-distance: reduce ? 0px : 4px;
+    out property <float> page-opacity: reduce ? 1 : 0.94;
 }
 
 // easing 仅供 Slint 使用，避免导出为 Rust 尚不支持的公共属性类型。
 export global MotionCurves {
     out property <easing> magnetic: spring(0);
     out property <easing> feedback: cubic-bezier(0.2, 0, 0, 1);
+    // 减速曲线：选中层、页面与开关落位，起步快、收尾轻。
+    out property <easing> decelerate: cubic-bezier(0, 0, 0.2, 1);
 }

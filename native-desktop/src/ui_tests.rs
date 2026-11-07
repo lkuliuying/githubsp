@@ -11,6 +11,10 @@ use githubsp_lib::{
 };
 use i_slint_backend_testing::{ElementHandle, TestingBackend, TestingBackendOptions};
 use slint::{ComponentHandle, Model};
+#[path = "automation_ui_tests.rs"]
+mod automation_ui_tests;
+#[path = "master_detail_ui_tests.rs"]
+mod master_detail_ui_tests;
 #[path = "motion_ui_tests.rs"]
 mod motion_ui_tests;
 #[path = "storage/ui_tests.rs"]
@@ -242,7 +246,7 @@ fn navigate(window: &MainWindow, label: &str) {
     let position = button.absolute_position();
     let size = button.size();
     assert!(
-        position.x >= 0.0 && position.x < 192.0,
+        position.x >= 0.0 && position.x < 220.0,
         "页面导航应固定在左侧"
     );
     assert!(
@@ -253,7 +257,12 @@ fn navigate(window: &MainWindow, label: &str) {
 }
 
 fn scroll_to_bottom(window: &MainWindow) {
-    ElementHandle::find_by_element_id(window, "MainWindow::main-scroll")
+    let area = if window.global::<Workspace>().get_page() == 1 {
+        "HistoryPage::records"
+    } else {
+        "MainWindow::main-scroll"
+    };
+    ElementHandle::find_by_element_id(window, area)
         .next()
         .unwrap()
         .scroll(0.0, -10_000.0);
@@ -284,6 +293,11 @@ fn scroll_to_button(window: &MainWindow, label: &str, height: u32) {
         "SettingsPage::settings-scroll"
     } else if workspace.get_download_section() == 1 {
         "NewDownloadPanel::new-scroll"
+    } else if ElementHandle::find_by_element_id(window, "QueuePanel::task-scroll")
+        .next()
+        .is_some()
+    {
+        "QueuePanel::task-scroll"
     } else {
         "QueuePanel::queue-list"
     };
@@ -291,7 +305,8 @@ fn scroll_to_button(window: &MainWindow, label: &str, height: u32) {
         .next()
         .unwrap();
     let viewport_top = viewport.absolute_position().y;
-    let viewport_bottom = (viewport_top + viewport.size().height).min(height as f32 - 43.0);
+    // 详情侧栏从页面顶部独立滚动，不能套用左侧列表的固定页尾留白。
+    let viewport_bottom = (viewport_top + viewport.size().height).min(height as f32);
     viewport.scroll(0.0, 100_000.0);
     window.window().take_snapshot().unwrap();
     let step = (viewport.size().height / 2.0).clamp(20.0, 150.0);
@@ -999,6 +1014,14 @@ fn verify_queue_display_order(original: &githubsp_lib::model::Snapshot) {
             .expect("任务行应包含对应操作")
     }
 
+    fn detail_button(window: &MainWindow, label: &str) -> ElementHandle {
+        ElementHandle::find_by_accessible_label(window, label)
+            .find(|item| {
+                item.accessible_role() == Some(i_slint_backend_testing::AccessibleRole::Button)
+            })
+            .unwrap_or_else(|| panic!("详情应保留操作 {label}"))
+    }
+
     fn displayed_ids(window: &MainWindow) -> Vec<String> {
         window
             .global::<Workspace>()
@@ -1010,12 +1033,8 @@ fn verify_queue_display_order(original: &githubsp_lib::model::Snapshot) {
 
     fn assert_numbers(window: &MainWindow) {
         window.window().take_snapshot().unwrap();
-        let header = ElementHandle::find_by_element_id(window, "QueuePanel::number-header")
-            .next()
-            .unwrap();
-        assert_eq!(header.accessible_label().as_deref(), Some("序号"));
-        assert_eq!(header.size().width, 36.0);
-        let mut previous_y = header.absolute_position().y;
+        let mut previous_y = f32::NEG_INFINITY;
+        let mut number_x = None;
         for (index, task) in window.global::<Workspace>().get_tasks().iter().enumerate() {
             let number = row(window, &task.filename)
                 .query_descendants()
@@ -1023,14 +1042,18 @@ fn verify_queue_display_order(original: &githubsp_lib::model::Snapshot) {
                 .find_first()
                 .unwrap();
             assert_eq!(number.accessible_label().unwrap(), (index + 1).to_string());
-            assert_eq!(number.size().width, header.size().width);
-            assert_eq!(number.absolute_position().x, header.absolute_position().x);
+            assert_eq!(number.size().width, 20.0);
+            assert_eq!(
+                *number_x.get_or_insert(number.absolute_position().x),
+                number.absolute_position().x
+            );
             assert!(number.absolute_position().y > previous_y);
             previous_y = number.absolute_position().y;
         }
     }
 
     let window = MainWindow::new().unwrap();
+    crate::presentation::bind_detail_selection(&window);
     let motion = window.global::<Motion>();
     motion.set_reduce(false);
     assert_eq!(motion.get_instant(), 80);
@@ -1092,9 +1115,9 @@ fn verify_queue_display_order(original: &githubsp_lib::model::Snapshot) {
     let expected = ["latest", "complete", "middle", "early", "running"];
     assert_eq!(displayed_ids(&window), expected);
     assert_numbers(&window);
-    for label in ["暂停下载", "取消下载"] {
-        button(&row(&window, "latest.zip"), label).invoke_accessible_default_action();
-    }
+    button(&row(&window, "latest.zip"), "下载详情与更多操作").invoke_accessible_default_action();
+    button(&row(&window, "latest.zip"), "暂停下载").invoke_accessible_default_action();
+    detail_button(&window, "取消下载").invoke_accessible_default_action();
     button(&row(&window, "complete.zip"), "打开所在目录").invoke_accessible_default_action();
     assert_eq!(
         *actions.borrow(),
@@ -1112,7 +1135,7 @@ fn verify_queue_display_order(original: &githubsp_lib::model::Snapshot) {
         "第 3 位"
     );
     assert_eq!(
-        button(&row(&window, "latest.zip"), "延后一位").accessible_enabled(),
+        detail_button(&window, "延后一位").accessible_enabled(),
         Some(false)
     );
 
@@ -1121,7 +1144,7 @@ fn verify_queue_display_order(original: &githubsp_lib::model::Snapshot) {
         ("优先下载", "top", 1),
         ("延后一位", "down", 2),
     ] {
-        button(&row(&window, "latest.zip"), label).invoke_accessible_default_action();
+        detail_button(&window, label).invoke_accessible_default_action();
         assert_eq!(
             actions.borrow().last().unwrap(),
             &("latest".into(), action.into())
@@ -1155,18 +1178,17 @@ fn verify_queue_display_order(original: &githubsp_lib::model::Snapshot) {
             workspace.get_tasks().row_data(0).unwrap().queue_order,
             format!("第 {position} 位")
         );
-        let latest = row(&window, "latest.zip");
         assert_eq!(
-            button(&latest, "提前一位").accessible_enabled(),
+            detail_button(&window, "提前一位").accessible_enabled(),
             Some(position != 1)
         );
         assert_eq!(
-            button(&latest, "优先下载").accessible_enabled(),
+            detail_button(&window, "优先下载").accessible_enabled(),
             Some(position != 1)
         );
         if position == 1 {
             let count = actions.borrow().len();
-            button(&latest, "提前一位").invoke_accessible_default_action();
+            detail_button(&window, "提前一位").invoke_accessible_default_action();
             assert_eq!(actions.borrow().len(), count);
         }
     }
@@ -1216,6 +1238,8 @@ fn verify_queue_display_order(original: &githubsp_lib::model::Snapshot) {
         button(&row(&window, "latest.zip"), "下载详情与更多操作")
             .invoke_accessible_default_action();
         capture(&window, "queue-priority-detail", width, height);
+        // 窄屏详情位于选中行下方，先滚动读取顺序，再滚动到排序操作。
+        scroll_to_button(&window, "第 2 位", height);
         assert!(
             ElementHandle::find_by_accessible_label(&window, "待下载顺序")
                 .next()
@@ -1438,6 +1462,7 @@ fn module_pages_bind_to_core_and_remain_usable_at_supported_sizes() {
     fixture_network.client = Default::default();
     Arc::get_mut(&mut api).unwrap().catalog = githubsp_lib::catalog::Catalog::new(fixture_network);
     let window = MainWindow::new().unwrap();
+    crate::presentation::bind_detail_selection(&window);
     window.global::<Motion>().set_reduce(false);
     controller::bind(&window, &api, runtime.handle());
     presentation::apply(&window, &runtime.block_on(api.manager.snapshot()).unwrap());
@@ -1449,6 +1474,8 @@ fn module_pages_bind_to_core_and_remain_usable_at_supported_sizes() {
     std::thread::sleep(Duration::from_millis(30));
     slint::platform::update_timers_and_animations();
     assert!(window.get_page_entering(), "过渡应由 Timer 收尾");
+    motion_ui_tests::verify_navigation_motion();
+    master_detail_ui_tests::verify_master_detail();
     motion_ui_tests::verify_favorites_motion();
     window.global::<Motion>().set_reduce(true);
     let ui = window.as_weak();
@@ -1467,8 +1494,8 @@ fn module_pages_bind_to_core_and_remain_usable_at_supported_sizes() {
         for (width,height) in [(1448,1086), (1040,740), (720,520)] {
             window.global::<Workspace>().invoke_navigate(0);
             capture(&window,"downloads",width,height);
-            let table_header = ElementHandle::find_by_element_id(&window,"QueuePanel::number-header").next();
-            assert_eq!(table_header.is_some(), width >= 1040, "默认窗口应显示完整队列表头，最小窗口使用双行记录");
+            let details = ElementHandle::find_by_element_id(&window,"QueuePanel::task-scroll").next();
+            assert_eq!(details.is_some(), width >= 1040, "宽屏使用独立详情侧栏，最小窗口在选中行下方展开详情");
             assert_eq!(window.global::<Workspace>().get_download_section(),0);
             for label in ["全部继续","全部暂停","清空已完成","下载队列","线路检测"] {
                 assert_button_in_window(&window,label,width,height);

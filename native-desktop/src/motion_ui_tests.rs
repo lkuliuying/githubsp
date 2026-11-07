@@ -107,8 +107,127 @@ fn rows(count: usize) -> Rc<VecModel<FavoriteRow>> {
     ))
 }
 
+pub(super) fn verify_navigation_motion() {
+    fn button(window: &MainWindow, label: &str) -> ElementHandle {
+        ElementHandle::find_by_accessible_label(window, label)
+            .find(|item| {
+                item.accessible_role() == Some(i_slint_backend_testing::AccessibleRole::Button)
+            })
+            .unwrap_or_else(|| panic!("应有导航入口 {label}"))
+    }
+
+    let window = MainWindow::new().unwrap();
+    crate::presentation::bind_detail_selection(&window);
+    let workspace = window.global::<Workspace>();
+    window.show().unwrap();
+    window
+        .window()
+        .set_size(slint::PhysicalSize::new(1040, 740));
+    window.window().take_snapshot().unwrap();
+    tick(250);
+    let indicator = element(&window, "WorkspaceNavigation::primary-indicator");
+    let start = indicator.absolute_position().y;
+    slint::platform::update_timers_and_animations();
+    workspace.set_page(2);
+    slint::platform::update_timers_and_animations();
+    let target = button(&window, "收藏").absolute_position().y;
+    assert!(
+        (indicator.absolute_position().y - start).abs() < 4.0,
+        "主导航应从当前位置继续移动"
+    );
+    tick(70);
+    let middle = indicator.absolute_position().y;
+    assert!(middle > start && middle < target, "主导航应存在连续过渡态");
+    workspace.set_page(1);
+    // 在同一绘制帧比较重定向位置，排除软件布局本身消耗的墙钟时间。
+    i_slint_backend_testing::mock_elapsed_time(Duration::ZERO);
+    assert!(
+        (indicator.absolute_position().y - middle).abs() < 4.0,
+        "反向切换不得闪跳"
+    );
+    window.global::<Motion>().set_reduce(true);
+    slint::platform::update_timers_and_animations();
+    assert!(
+        (indicator.absolute_position().y - button(&window, "历史").absolute_position().y).abs()
+            < 4.0,
+        "减少动效应立即定位导航选中层"
+    );
+
+    workspace.set_page(3);
+    let settings = window.global::<Preferences>();
+    for (width, height) in [(1448, 1086), (1040, 740), (720, 520)] {
+        capture(&window, "linear-settings", width, height);
+        let content = element(&window, "SettingsPage::settings-content");
+        assert!(content.size().width <= 760.0, "设置内容应限制阅读宽度");
+        for label in [
+            "下载设置",
+            "窗口与提醒",
+            "收藏检查",
+            "数据管理",
+            "软件更新与关于",
+        ] {
+            let item = button(&window, label);
+            let p = item.absolute_position();
+            let size = item.size();
+            assert!(p.y >= 0.0 && p.y + size.height <= height as f32);
+            if width >= 900 {
+                assert!(p.x + size.width <= 220.0, "宽屏设置入口应位于统一侧栏");
+            } else {
+                assert!(p.x >= 64.0, "窄屏设置入口应保留在正文顶部");
+            }
+        }
+        assert_button_in_window(&window, "保存全部设置", width, height);
+        assert_button_in_window(&window, "恢复全部默认", width, height);
+    }
+
+    let tabs = element(&window, "ModuleNavigation::selection");
+    let initial_x = tabs.absolute_position().x;
+    window.global::<Motion>().set_reduce(false);
+    slint::platform::update_timers_and_animations();
+    assert_eq!(tabs.absolute_position().x, initial_x);
+    settings.set_section(4);
+    slint::platform::update_timers_and_animations();
+    assert!((tabs.absolute_position().x - initial_x).abs() < 4.0);
+    tick(70);
+    let middle_x = tabs.absolute_position().x;
+    let last_x = button(&window, "软件更新与关于").absolute_position().x;
+    assert!(
+        middle_x > initial_x && middle_x < last_x,
+        "标签选中层应平滑滑动"
+    );
+    settings.set_section(1);
+    i_slint_backend_testing::mock_elapsed_time(Duration::ZERO);
+    assert!((tabs.absolute_position().x - middle_x).abs() < 4.0);
+    window.global::<Motion>().set_reduce(true);
+    slint::platform::update_timers_and_animations();
+    assert!(
+        (tabs.absolute_position().x - button(&window, "窗口与提醒").absolute_position().x).abs()
+            < 4.0
+    );
+    capture(&window, "magpie-reduced-navigation", 720, 520);
+
+    let calls = Rc::new(RefCell::new(Vec::new()));
+    let recorded = calls.clone();
+    workspace.on_navigate(move |page| recorded.borrow_mut().push(page));
+    click(&window, &button(&window, "历史"));
+    assert_eq!(
+        calls.borrow().as_slice(),
+        &[1],
+        "一次点击只发出一次页面操作"
+    );
+    window
+        .window()
+        .dispatch_event(WindowEvent::KeyPressed { text: " ".into() });
+    window
+        .window()
+        .dispatch_event(WindowEvent::KeyReleased { text: " ".into() });
+    assert_eq!(calls.borrow().as_slice(), &[1, 1], "键盘仍能操作导航按钮");
+    window.hide().unwrap();
+}
+
 pub(super) fn verify_favorites_motion() {
     let window = MainWindow::new().unwrap();
+    crate::presentation::bind_detail_selection(&window);
     let favorites = window.global::<Favorites>();
     let model = rows(200);
     favorites.set_rows(model.clone().into());
@@ -249,17 +368,39 @@ pub(super) fn verify_favorites_motion() {
         ("motion/project-000".into(), "browse".into())
     );
 
-    hover(&window, &first);
+    let scroll_position = hover(&window, &first);
     tick(400);
-    let before = indicator.absolute_position();
     let list = element(&window, "FavoritesPage::favorite-list");
-    list.scroll(0.0, -40.0);
     slint::platform::update_timers_and_animations();
+    let before = indicator.absolute_position();
+    let visual_before = surface(&first).absolute_position();
+    window
+        .window()
+        .dispatch_event(WindowEvent::PointerScrolled {
+            position: scroll_position,
+            delta_x: 0.0,
+            delta_y: -40.0,
+        });
+    i_slint_backend_testing::mock_elapsed_time(Duration::ZERO);
     window.window().take_snapshot().unwrap();
     assert!(
-        (indicator.absolute_position().y - before.y + 40.0).abs() < 1.5,
-        "滚动偏移应即时叠加"
+        ElementHandle::find_by_element_id(&window, "BentoGrid::indicator")
+            .next()
+            .is_some(),
+        "滚动首帧仍应保留可见的磁吸框"
     );
+    let visual_after = surface(&first).absolute_position();
+    let indicator_after = indicator.absolute_position();
+    // 嵌套滚动与虚拟行修正均可能改变窗口坐标，应跟随实际卡片位移。
+    assert!(
+        visual_after.y < visual_before.y,
+        "滚轮应穿过卡片观察器并滚动列表"
+    );
+    assert!(
+        ((indicator_after.y - before.y) - (visual_after.y - visual_before.y)).abs() < 1.5,
+        "滚动时框体与卡片应即时同步：框 {before:?} → {indicator_after:?}；卡片 {visual_before:?} → {visual_after:?}"
+    );
+    aligned(&indicator, &surface(&first));
     list.scroll(0.0, 100_000.0);
     window.window().take_snapshot().unwrap();
     hover(&window, &first);

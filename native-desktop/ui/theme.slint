@@ -1,19 +1,44 @@
-import { Motion } from "motion.slint";
+import { Motion, MotionCurves } from "motion.slint";
 
+// 设计令牌：参考 Linear 的中性浅色界面，紫色只用于选中与主操作，
+// 绿/黄/红保留给“完成/警示/失败”等状态语义，避免强调色与状态色混用。
 export global Theme {
-    out property <color> text: #202523;
-    out property <color> muted: #626d67;
-    out property <color> border: #e6eae7;
-    out property <color> strong-border: #cbd3ce;
-    out property <color> green: #07814b;
-    out property <color> green-hover: #08683e;
-    out property <color> green-soft: #e8f8f0;
-    out property <color> blue-soft: #f1f5f3;
-    out property <color> canvas: #f7f8f8;
-    out property <color> subtle: #f3f5f4;
-    out property <color> red: #bd314b;
-    out property <length> panel-radius: 12px;
+    out property <color> text: #1b1b1f;
+    out property <color> muted: #6b6b76;
+    out property <color> faint: #73737f;
+    out property <color> border: #e6e6ea;
+    out property <color> strong-border: #d4d4da;
+    out property <color> accent: #5e6ad2;
+    out property <color> accent-hover: #4f5bc0;
+    out property <color> accent-pressed: #4450ad;
+    out property <color> accent-soft: #eef0fb;
+    out property <color> accent-soft-pressed: #e2e5f8;
+    out property <color> accent-text: #4954b8;
+    out property <color> accent-ring: #5e6ad240;
+    out property <color> success: #1a7f4b;
+    out property <color> success-soft: #e8f6ee;
+    out property <color> success-border: #cfe9da;
+    out property <color> success-text: #146c3f;
+    out property <color> warning: #b87400;
+    out property <color> warning-soft: #fff6e5;
+    out property <color> warning-border: #f4e2bd;
+    out property <color> warning-text: #855600;
+    out property <color> red: #c4314b;
+    out property <color> red-soft: #fdf0f2;
+    out property <color> red-pressed: #fbe1e6;
+    out property <color> red-border: #f3d0d7;
+    out property <color> canvas: #f7f7f8;
+    out property <color> surface-muted: #f8f8fa;
+    out property <color> subtle: #f2f2f4;
+    out property <color> pressed: #e9e9ed;
+    out property <color> overlay: #0f0f1452;
+    out property <color> shadow: #0f0f140d;
+    out property <color> shadow-strong: #0f0f1426;
+    out property <length> panel-radius: 8px;
+    out property <length> control-radius: 6px;
     out property <length> card-gap: 12px;
+    out property <length> sidebar-width: 220px;
+    out property <length> settings-width: 760px;
 }
 
 export component Label inherits Text {
@@ -42,6 +67,20 @@ export component Icon inherits Rectangle {
     }
 }
 
+// 状态色点：列表行左侧的小圆点，比整块徽标更安静。
+// tone 与 Badge 一致：1 完成、2 失败、3/5 警示、4 进行中，其余为中性。
+export component StatusDot inherits Rectangle {
+    in property <int> tone;
+    width: 8px;
+    preferred-height: 8px;
+    Rectangle {
+        y: (parent.height - 8px) / 2; height: 8px;
+        border-radius: 4px;
+        background: root.tone == 1 ? Theme.success : root.tone == 2 ? Theme.red : root.tone == 3 || root.tone == 5 ? Theme.warning : root.tone == 4 ? Theme.accent : Theme.faint;
+        animate background { duration: Motion.fast; easing: ease-out; }
+    }
+}
+
 export component ActionButton inherits Rectangle {
     in property <bool> collapsed;
     visible: !collapsed;
@@ -51,9 +90,9 @@ export component ActionButton inherits Rectangle {
     in property <image> icon;
     in property <length> icon-size: 18px;
     in property <bool> show-icon: true;
-    // 图标微动效：悬停轻抬、按下回弹；减少动效模式下时长归零，图标完全静止。
+    // 导航可关闭图标按压位移，保持内容与共享指示层的对齐。
     in property <bool> icon-motion: true;
-    // 文字强调色：调用方（如顶栏标签）用它做选中变绿，未设置时保持正文色。
+    // 文字强调色：调用方（如侧栏）用它表示选中，未设置时保持正文色。
     in property <color> accent-text: Theme.text;
     in property <bool> leading;
     in property <length> font-size: compact ? 12px : 13px;
@@ -65,11 +104,9 @@ export component ActionButton inherits Rectangle {
     in property <bool> compact;
     in property <bool> enabled: true;
     out property <bool> has-focus: focus.has-focus;
-    // 图标旋转角度：悬停 4°，按下 -7°（“点头”反馈），长度/角度是 Slint 可动画类型。
-    property <angle> icon-angle: root.icon-motion ? (touch.pressed ? -7deg : touch.has-hover ? 4deg : 0deg) : 0deg;
-    animate icon-angle { duration: Motion.press; easing: ease-out; }
-    // 按下涟漪进度 0 → 1：半径与透明度都由它推导，只需一条动画。
-    property <float> ripple-progress: 0.0;
+    out property <bool> hovered: touch.has-hover;
+    private property <length> press-offset: root.icon-motion && touch.pressed ? 1px : 0px;
+    animate press-offset { enabled: !Motion.reduce; duration: Motion.press; easing: ease-out; }
     callback clicked;
     forward-focus: focus;
     accessible-role: button;
@@ -82,44 +119,26 @@ export component ActionButton inherits Rectangle {
     max-width: collapsed ? 0px : 100000px;
     horizontal-stretch: 0;
     vertical-stretch: 0;
-    border-radius: 8px;
+    border-radius: Theme.control-radius;
     clip: true;
-    opacity: enabled ? 1 : 0.48;
+    opacity: enabled ? 1 : 0.45;
     animate opacity { duration: Motion.fast; easing: ease-out; }
-    border-width: flat ? 0 : 1px;
-    border-color: focus.has-focus ? Theme.green : primary ? Theme.green : danger ? #f7d4db : Theme.border;
+    border-width: flat && !focus.has-focus ? 0px : 1px;
+    border-color: focus.has-focus ? Theme.accent : primary ? (touch.pressed ? Theme.accent-pressed : touch.has-hover ? Theme.accent-hover : Theme.accent) : danger ? Theme.red-border : soft ? Theme.accent-soft : touch.has-hover ? Theme.strong-border : Theme.border;
     animate border-color { duration: Motion.fast; easing: ease-out; }
-    background: primary ? (touch.pressed ? #056b3f : touch.has-hover ? Theme.green-hover : Theme.green) : danger ? (touch.pressed ? #ffe1e7 : #fff0f3) : soft ? (touch.pressed ? #d9f3e6 : Theme.green-soft) : touch.pressed ? #e7ece9 : touch.has-hover ? Theme.subtle : flat ? transparent : white;
+    background: primary ? (touch.pressed ? Theme.accent-pressed : touch.has-hover ? Theme.accent-hover : Theme.accent) : danger ? (touch.pressed ? Theme.red-pressed : Theme.red-soft) : soft ? (touch.pressed ? Theme.accent-soft-pressed : Theme.accent-soft) : touch.pressed ? Theme.pressed : touch.has-hover ? Theme.subtle : flat ? transparent : white;
     animate background { duration: Motion.fast; easing: ease-out; }
-    // 按下涟漪：圆心在按钮中心，半径扩散到覆盖整个按钮；透明度随进度衰减，松手立即归零。
-    Rectangle {
-        x: (root.width - self.width) / 2;
-        y: (root.height - self.height) / 2;
-        width: root.ripple-progress * (root.width + root.height);
-        height: self.width;
-        border-radius: self.width / 2;
-        background: root.primary ? white : root.danger ? Theme.red : Theme.green;
-        opacity: (1.0 - root.ripple-progress) * 0.16;
-    }
-    states [
-        pressed when touch.pressed: {
-            ripple-progress: 1.0;
-            in { animate ripple-progress { duration: Motion.ripple; easing: ease-out; } }
-            out { animate ripple-progress { duration: 0ms; } }
-        }
-    ]
     layout := HorizontalLayout {
-        padding-left: root.compact ? 8px : 14px;
-        padding-right: root.compact ? 8px : 14px;
-        spacing: root.text == "" ? 0px : 8px;
+        padding-left: root.compact ? 8px : 12px;
+        padding-right: root.compact ? 8px : 12px;
+        spacing: root.text == "" ? 0px : 7px;
         alignment: root.leading ? start : center;
         if root.show-icon && root.icon.width > 0: Rectangle {
             width: root.icon-size;
             preferred-height: root.icon-size;
-            transform-rotation: root.icon-angle;
-            Icon { source: root.icon; tint: root.primary ? white : root.danger ? Theme.red : root.soft ? Theme.green-hover : root.accent-text; animate tint { duration: Motion.fast; easing: ease-out; } width: root.icon-size; preferred-height: root.icon-size; }
+            Icon { y: Motion.reduce ? 0px : root.press-offset; height: parent.height; source: root.icon; tint: root.primary ? white : root.danger ? Theme.red : root.soft ? Theme.accent-text : root.accent-text == Theme.text ? Theme.muted : root.accent-text; animate tint { duration: Motion.fast; easing: ease-out; } width: root.icon-size; preferred-height: root.icon-size; }
         }
-        if root.text != "": Label { text: root.text; font-size: root.font-size; font-weight: root.weight; color: root.primary ? white : root.danger ? Theme.red : root.soft ? Theme.green-hover : root.accent-text; animate color { duration: Motion.fast; easing: ease-out; } }
+        if root.text != "": Label { text: root.text; font-size: root.font-size; font-weight: root.weight; color: root.primary ? white : root.danger ? Theme.red : root.soft ? Theme.accent-text : root.accent-text; animate color { duration: Motion.fast; easing: ease-out; } }
     }
     focus := FocusScope {
         enabled: root.enabled && !root.pending;
@@ -130,6 +149,44 @@ export component ActionButton inherits Rectangle {
         }
     }
     touch := TouchArea { enabled: root.enabled && !root.pending; mouse-cursor: pointer; clicked => { focus.focus(); root.clicked(); } }
+}
+
+// 分段控件：一组互斥选项共用一个滑动选中块（Linear / Vercel 的 Tabs 样式）。
+// 每段仍是可键盘操作的 ActionButton，无障碍标签等于选项文字。
+export component SegmentedControl inherits Rectangle {
+    in property <[string]> items;
+    in property <[image]> icons;
+    in property <int> selected;
+    in property <bool> enabled: true;
+    callback select(int);
+    private property <length> segment-width: (root.width - 6px) / max(1, root.items.length);
+    private property <float> animated-index: root.selected;
+    animate animated-index { enabled: !Motion.reduce; duration: Motion.navigation; easing: MotionCurves.decelerate; }
+    min-width: root.items.length * 100px + 6px;
+    preferred-width: root.items.length * 116px + 6px;
+    height: 38px;
+    horizontal-stretch: 0;
+    border-radius: Theme.control-radius + 2px;
+    background: Theme.subtle;
+    segment-indicator := Rectangle {
+        x: 3px + root.segment-width * (Motion.reduce ? root.selected : root.animated-index);
+        y: 3px; width: root.segment-width; height: root.height - 6px;
+        border-radius: Theme.control-radius;
+        background: white;
+        border-width: 1px; border-color: Theme.border;
+        drop-shadow-blur: 3px; drop-shadow-offset-y: 1px; drop-shadow-color: Theme.shadow;
+    }
+    for item[index] in root.items: ActionButton {
+        x: 3px + root.segment-width * index; y: 3px;
+        width: root.segment-width; height: root.height - 6px;
+        text: item; help: item; compact: true; flat: true; icon-motion: false;
+        icon: root.icons[index];
+        icon-size: 15px;
+        weight: root.selected == index ? 600 : 500;
+        accent-text: root.selected == index ? Theme.text : Theme.muted;
+        enabled: root.enabled;
+        clicked => { root.select(index); }
+    }
 }
 
 export component Input inherits Rectangle {
@@ -143,23 +200,32 @@ export component Input inherits Rectangle {
     forward-focus: input;
     min-height: 36px;
     min-width: 80px;
-    border-radius: 8px;
+    border-radius: Theme.control-radius;
     border-width: 1px;
-    border-color: input.has-focus ? Theme.green : Theme.strong-border;
+    border-color: input.has-focus ? Theme.accent : Theme.strong-border;
     animate border-color { duration: Motion.fast; easing: ease-out; }
     background: enabled ? white : Theme.subtle;
     animate background { duration: Motion.fast; }
+    // 聚焦光环：外扩 3px 的半透明强调色，代替加粗边框。
+    Rectangle {
+        x: -3px; y: -3px; width: parent.width + 6px; height: parent.height + 6px;
+        border-radius: Theme.control-radius + 3px;
+        border-width: 3px;
+        border-color: input.has-focus ? Theme.accent-ring : transparent;
+        animate border-color { duration: Motion.fast; easing: ease-out; }
+    }
     HorizontalLayout {
-        padding-left: 12px; padding-right: 12px; spacing: 10px;
-        if root.icon.width > 0: Icon { source: root.icon; }
+        padding-left: 11px; padding-right: 11px; spacing: 9px;
+        if root.icon.width > 0: Icon { source: root.icon; width: 16px; }
         Rectangle {
             horizontal-stretch: 1;
-            if root.text == "": Text { width: parent.width; text: root.placeholder; color: Theme.muted; font-size: 13px; vertical-alignment: center; horizontal-alignment: left; overflow: elide; }
+            if root.text == "": Text { width: parent.width; text: root.placeholder; color: Theme.faint; font-size: 13px; vertical-alignment: center; horizontal-alignment: left; overflow: elide; }
             input := TextInput {
                 text <=> root.text;
                 enabled: root.enabled && !root.pending;
                 font-size: 13px;
                 color: Theme.text;
+                selection-background-color: Theme.accent-soft-pressed;
                 single-line: true;
                 vertical-alignment: center;
                 horizontal-alignment: left;
@@ -176,6 +242,9 @@ export component Panel inherits Rectangle {
     border-radius: Theme.panel-radius;
     border-width: 1px;
     border-color: Theme.border;
+    drop-shadow-blur: 2px;
+    drop-shadow-offset-y: 1px;
+    drop-shadow-color: Theme.shadow;
 }
 
 export component Heading inherits Rectangle {
@@ -184,18 +253,25 @@ export component Heading inherits Rectangle {
     in property <image> icon;
     in property <bool> page;
     in property <bool> inline-description;
-    height: page ? 55px : 44px;
+    height: page ? 52px : 40px;
     HorizontalLayout {
-        spacing: 12px;
-        if !root.page && root.icon.width > 0: Icon { source: root.icon; tint: Theme.muted; width: 20px; preferred-height: 20px; }
+        spacing: 10px;
+        if !root.page && root.icon.width > 0: Rectangle {
+            width: 28px;
+            Rectangle {
+                y: (parent.height - 28px) / 2; height: 28px;
+                border-radius: Theme.control-radius; background: Theme.subtle;
+                Icon { x: 6px; y: 6px; source: root.icon; tint: Theme.muted; width: 16px; height: 16px; }
+            }
+        }
         if !root.inline-description: VerticalLayout {
-            spacing: 3px;
-            Label { text: root.title; font-size: root.page ? 24px : 16px; font-weight: 650; }
+            spacing: 2px; alignment: center;
+            Label { text: root.title; font-size: root.page ? 22px : 14px; font-weight: root.page ? 650 : 600; }
             if root.description != "": Muted { text: root.description; font-size: 12px; }
         }
         if root.inline-description: HorizontalLayout {
-            spacing: 12px;
-            Label { text: root.title; font-size: 18px; font-weight: 650; horizontal-stretch: 0; }
+            spacing: 10px;
+            Label { text: root.title; font-size: 17px; font-weight: 650; horizontal-stretch: 0; }
             Muted { text: root.description; font-size: 11px; horizontal-stretch: 1; }
         }
         @children
@@ -206,10 +282,13 @@ export component Message inherits Rectangle {
     in property <string> text;
     in property <bool> error;
     in property <bool> success;
-    min-height: body.preferred-height + 22px;
-    border-radius: 8px;
-    background: error ? #fff0f3 : success ? Theme.green-soft : Theme.blue-soft;
-    body := Text { x: 13px; y: 11px; width: parent.width - 26px; text: root.text; color: root.error ? Theme.red : root.success ? #087747 : Theme.muted; wrap: word-wrap; font-size: 12px; }
+    min-height: body.preferred-height + 20px;
+    border-radius: Theme.control-radius;
+    border-width: 1px;
+    border-color: error ? Theme.red-border : success ? Theme.success-border : Theme.border;
+    background: error ? Theme.red-soft : success ? Theme.success-soft : Theme.surface-muted;
+    Rectangle { x: 0px; y: 6px; width: 2px; height: parent.height - 12px; border-radius: 1px; background: root.error ? Theme.red : root.success ? Theme.success : Theme.accent; }
+    body := Text { x: 13px; y: 10px; width: parent.width - 26px; text: root.text; color: root.error ? Theme.red : root.success ? Theme.success-text : Theme.muted; wrap: word-wrap; font-size: 12px; }
 }
 
 export component EmptyState inherits Rectangle {
@@ -219,23 +298,38 @@ export component EmptyState inherits Rectangle {
     min-height: 165px;
     VerticalLayout {
         alignment: center; spacing: 10px; padding: 20px;
-        HorizontalLayout { alignment: center; Icon { source: root.icon; tint: #a9b9cf; width: 40px; preferred-height: 40px; } }
-        if root.title != "": Label { text: root.title; font-size: 15px; font-weight: 600; horizontal-alignment: center; }
+        HorizontalLayout {
+            alignment: center;
+            Rectangle {
+                width: 48px; height: 48px;
+                border-radius: 12px; background: Theme.subtle;
+                border-width: 1px; border-color: Theme.border;
+                Icon { x: 12px; y: 12px; source: root.icon; tint: Theme.faint; width: 24px; height: 24px; }
+            }
+        }
+        if root.title != "": Label { text: root.title; font-size: 14px; font-weight: 600; horizontal-alignment: center; }
         Muted { text: root.description; wrap: word-wrap; horizontal-alignment: center; }
     }
 }
 
+// 状态徽标：胶囊外形 + 前置色点，配色只取状态语义色。
 export component Badge inherits Rectangle {
     in property <string> text;
     in property <int> tone;
     horizontal-stretch: 0;
-    preferred-height: 25px;
-    min-height: 25px;
-    min-width: label.preferred-width + 16px;
+    preferred-height: 22px;
+    min-height: 22px;
+    min-width: label.preferred-width + 26px;
     Rectangle {
-        y: (parent.height - self.height) / 2; height: 25px; border-radius: 6px;
-        background: root.tone == 1 ? Theme.green-soft : root.tone == 2 ? #fff0f3 : root.tone == 3 ? #fff7e6 : root.tone == 4 ? Theme.blue-soft : root.tone == 5 ? #f3edff : #f0f4f9;
-        label := Label { text: root.text; x: 8px; width: parent.width - 16px; height: parent.height; color: root.tone == 1 ? #00834a : root.tone == 2 ? #cb324d : root.tone == 3 ? #855600 : root.tone == 4 ? #245f99 : root.tone == 5 ? #6b479c : #56625b; font-size: 11px; }
+        y: (parent.height - self.height) / 2; height: 22px; border-radius: 11px;
+        border-width: 1px;
+        border-color: root.tone == 1 ? Theme.success-border : root.tone == 2 ? Theme.red-border : (root.tone == 3 || root.tone == 5) ? Theme.warning-border : root.tone == 4 ? Theme.accent-soft-pressed : Theme.border;
+        background: root.tone == 1 ? Theme.success-soft : root.tone == 2 ? Theme.red-soft : (root.tone == 3 || root.tone == 5) ? Theme.warning-soft : root.tone == 4 ? Theme.accent-soft : Theme.surface-muted;
+        Rectangle {
+            x: 8px; y: (parent.height - 6px) / 2; width: 6px; height: 6px; border-radius: 3px;
+            background: root.tone == 1 ? Theme.success : root.tone == 2 ? Theme.red : (root.tone == 3 || root.tone == 5) ? Theme.warning : root.tone == 4 ? Theme.accent : Theme.faint;
+        }
+        label := Label { text: root.text; x: 18px; width: parent.width - 26px; height: parent.height; color: root.tone == 1 ? Theme.success-text : root.tone == 2 ? Theme.red : (root.tone == 3 || root.tone == 5) ? Theme.warning-text : root.tone == 4 ? Theme.accent-text : Theme.muted; font-size: 11px; font-weight: 500; }
     }
 }
 
@@ -247,10 +341,11 @@ export component Stat inherits Panel {
     in property <bool> compact;
     background: white;
     border-width: 0px;
+    drop-shadow-blur: 0px;
     height: compact ? 52px : 60px;
     HorizontalLayout {
         padding: root.compact ? 8px : 12px; spacing: 8px;
-        VerticalLayout { spacing: 2px; Muted { text: root.title; font-size: 11px; } Label { text: root.value; color: root.tone == 1 ? Theme.green-hover : root.tone == 2 ? Theme.red : root.tone == 3 || root.tone == 5 ? #986000 : Theme.text; font-size: 20px; font-weight: 650; } }
+        VerticalLayout { spacing: 2px; Muted { text: root.title; font-size: 11px; } Label { text: root.value; color: root.tone == 1 ? Theme.success-text : root.tone == 2 ? Theme.red : root.tone == 3 || root.tone == 5 ? Theme.warning-text : Theme.text; font-size: 20px; font-weight: 650; } }
     }
 }
 
@@ -261,10 +356,18 @@ export component SettingCard inherits Panel {
     vertical-stretch: 0;
     min-width: 0px;
     preferred-width: 400px;
+    background: transparent;
+    border-width: 0px;
+    drop-shadow-color: transparent;
     min-height: content.preferred-height;
     content := VerticalLayout {
-        padding: 20px; spacing: 16px;
-        Heading { title: root.title; description: root.description; icon: root.icon; }
+        padding-top: 16px; padding-bottom: 20px; padding-left: 4px; padding-right: 4px; spacing: 16px;
+        VerticalLayout {
+            spacing: 6px;
+            Label { text: root.title; color: Theme.muted; font-size: 13px; font-weight: 600; }
+            if root.description != "": Muted { text: root.description; font-size: 12px; wrap: word-wrap; }
+        }
+        Rectangle { height: 1px; background: Theme.border; }
         @children
     }
 }
@@ -273,23 +376,30 @@ export component Switch inherits Rectangle {
     in-out property <bool> checked;
     in property <bool> enabled: true;
     callback toggled;
-    width: 44px; height: 25px;
-    border-radius: 16px;
-    background: checked ? Theme.green : #c4cdc7;
+    width: 36px; height: 20px;
+    border-radius: 10px;
+    background: checked ? (touch.has-hover ? Theme.accent-hover : Theme.accent) : (touch.has-hover ? #c9c9d1 : #d9d9df);
     animate background { duration: Motion.fast; easing: ease-out; }
     opacity: enabled ? 1 : 0.5;
     animate opacity { duration: Motion.fast; easing: ease-out; }
-    border-width: focus.has-focus ? 2px : 0px;
-    border-color: #7183a1;
     forward-focus: focus;
     accessible-role: checkbox;
     accessible-checkable: true;
     accessible-checked: checked;
     accessible-enabled: enabled;
     accessible-action-default => { if root.enabled { root.checked = !root.checked; root.toggled(); } }
-    Rectangle { x: root.checked ? 22px : 3px; y: 3px; width: 19px; height: 19px; border-radius: 10px; background: white; animate x { duration: Motion.fast; easing: cubic-bezier(0.2, 0, 0, 1); } }
+    Rectangle {
+        x: -3px; y: -3px; width: parent.width + 6px; height: parent.height + 6px;
+        border-radius: 13px; border-width: 3px;
+        border-color: focus.has-focus ? Theme.accent-ring : transparent;
+    }
+    Rectangle {
+        x: root.checked ? 18px : 2px; y: 2px; width: 16px; height: 16px; border-radius: 8px; background: white;
+        drop-shadow-blur: 2px; drop-shadow-offset-y: 1px; drop-shadow-color: Theme.shadow-strong;
+        animate x { duration: Motion.base; easing: MotionCurves.decelerate; }
+    }
     focus := FocusScope { enabled: root.enabled; key-pressed(event) => { if event.text == " " { root.checked = !root.checked; root.toggled(); return accept; } return reject; } }
-    TouchArea { enabled: root.enabled; mouse-cursor: pointer; clicked => { focus.focus(); root.checked = !root.checked; root.toggled(); } }
+    touch := TouchArea { enabled: root.enabled; mouse-cursor: pointer; clicked => { focus.focus(); root.checked = !root.checked; root.toggled(); } }
 }
 
 export component Slider inherits Rectangle {
@@ -312,8 +422,12 @@ export component Slider inherits Rectangle {
     accessible-action-increment => { if root.enabled { root.set-value(root.value + root.step); } }
     accessible-action-decrement => { if root.enabled { root.set-value(root.value - root.step); } }
     accessible-action-set-value(next) => { if root.enabled && next.is-float() { root.set-value(next.to-float()); } }
-    Rectangle { x: 8px; y: 10px; width: parent.width - 16px; height: 6px; border-radius: 3px; background: Theme.border; Rectangle { x: 0px; width: parent.width * clamp((root.value - root.minimum) / max(1, root.maximum - root.minimum), 0, 1); height: parent.height; border-radius: 3px; background: Theme.green; } }
-    Rectangle { x: (parent.width - 18px) * clamp((root.value - root.minimum) / max(1, root.maximum - root.minimum), 0, 1); y: 4px; width: 18px; height: 18px; border-radius: 9px; background: Theme.green; border-width: focus.has-focus ? 2px : 0px; border-color: Theme.strong-border; }
+    Rectangle { x: 8px; y: 11px; width: parent.width - 16px; height: 4px; border-radius: 2px; background: Theme.border; Rectangle { x: 0px; width: parent.width * clamp((root.value - root.minimum) / max(1, root.maximum - root.minimum), 0, 1); height: parent.height; border-radius: 2px; background: Theme.accent; } }
+    Rectangle {
+        x: (parent.width - 16px) * clamp((root.value - root.minimum) / max(1, root.maximum - root.minimum), 0, 1); y: 5px; width: 16px; height: 16px; border-radius: 8px;
+        background: white; border-width: focus.has-focus ? 2px : 1px; border-color: Theme.accent;
+        drop-shadow-blur: 3px; drop-shadow-offset-y: 1px; drop-shadow-color: Theme.shadow-strong;
+    }
     focus := FocusScope {
         enabled: root.enabled;
         key-pressed(event) => {
@@ -341,7 +455,7 @@ export component CheckBox inherits Rectangle {
     height: 25px;
     min-width: content.min-width;
     horizontal-stretch: 0;
-    opacity: enabled ? 1 : 0.48;
+    opacity: enabled ? 1 : 0.45;
     forward-focus: focus;
     accessible-role: checkbox;
     accessible-label: text;
@@ -350,10 +464,10 @@ export component CheckBox inherits Rectangle {
     accessible-enabled: enabled && !pending;
     accessible-action-default => { if root.enabled && !root.pending { root.checked = !root.checked; root.toggled(); } }
     content := HorizontalLayout {
-        spacing: root.text == "" ? 0px : 5px;
-        Rectangle { width: 17px; height: 17px; y: (parent.height - self.height) / 2; border-radius: 3px; border-width: focus.has-focus ? 2px : 1px; border-color: root.checked ? Theme.green : Theme.strong-border; background: root.checked ? Theme.green : white; animate background { duration: Motion.fast; } animate border-color { duration: Motion.fast; } Label { text: root.checked ? "✓" : ""; color: white; font-size: 13px; horizontal-alignment: center; } }
-        if root.text != "": Label { text: root.text; font-size: 11px; }
+        spacing: root.text == "" ? 0px : 6px;
+        Rectangle { width: 16px; height: 16px; y: (parent.height - self.height) / 2; border-radius: 4px; border-width: 1px; border-color: focus.has-focus || root.checked ? Theme.accent : touch.has-hover ? Theme.faint : Theme.strong-border; background: root.checked ? Theme.accent : white; animate background { duration: Motion.fast; } animate border-color { duration: Motion.fast; } Label { text: root.checked ? "✓" : ""; color: white; font-size: 12px; horizontal-alignment: center; } }
+        if root.text != "": Label { text: root.text; font-size: 12px; }
     }
     focus := FocusScope { enabled: root.enabled && !root.pending; key-pressed(event) => { if event.text == " " { root.checked = !root.checked; root.toggled(); return accept; } return reject; } }
-    TouchArea { enabled: root.enabled && !root.pending; mouse-cursor: pointer; clicked => { focus.focus(); root.checked = !root.checked; root.toggled(); } }
+    touch := TouchArea { enabled: root.enabled && !root.pending; mouse-cursor: pointer; clicked => { focus.focus(); root.checked = !root.checked; root.toggled(); } }
 }

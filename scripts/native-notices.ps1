@@ -69,5 +69,10 @@ foreach ($noticePackage in @($noticeVisited | ForEach-Object { $noticePackages[$
 if ($noticeMissing.Count -gt 0) { throw "以下依赖缺少可提取的许可文件，请先补齐：$($noticeMissing -join ', ')" }
 # 只规范汇总文件的换行和行尾空白，不改动许可正文或上游原文件。
 $noticeOutput = [regex]::Replace($noticeText.ToString().Replace("`r`n", "`n"), '[\t ]+$', '', [Text.RegularExpressions.RegexOptions]::Multiline)
-[IO.File]::WriteAllText((Join-Path $noticeRoot 'native-desktop/resources/THIRD_PARTY_NOTICES.txt'), $noticeOutput, [Text.UTF8Encoding]::new($false))
+$noticeDestination = Join-Path $noticeRoot 'native-desktop/resources/THIRD_PARTY_NOTICES.txt'
+# 内容不变时保留时间戳，避免 include_str! 触发无意义的 Rust 优化构建。
+if (-not (Test-Path -LiteralPath $noticeDestination -PathType Leaf) -or
+    [IO.File]::ReadAllText($noticeDestination) -cne $noticeOutput) {
+    [IO.File]::WriteAllText($noticeDestination, $noticeOutput, [Text.UTF8Encoding]::new($false))
+}
 Write-Output "已生成 $($noticeRuntimeSet.Count) 个运行依赖节点的声明。"

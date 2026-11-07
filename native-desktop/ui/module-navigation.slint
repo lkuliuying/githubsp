@@ -1,70 +1,139 @@
-import { Workspace, Updates } from "state.slint";
+import { Workspace, Preferences, Updates } from "state.slint";
 import { Theme, Label, Muted, Icon, ActionButton } from "theme.slint";
+import { Motion, MotionCurves } from "motion.slint";
 
+// 二级入口：缩进在所属一级入口下方，左侧细线表示层级，选中层平滑移动。
+component SectionNavigation inherits Rectangle {
+    in property <[string]> items;
+    in property <int> selected;
+    callback select(int);
+    private property <length> stride: 34px;
+    height: items.length * stride;
+    private property <length> selection-y: selected * stride;
+    private property <length> animated-y: selection-y;
+    animate animated-y { enabled: !Motion.reduce; duration: Motion.navigation; easing: MotionCurves.decelerate; }
+    // 层级引导线
+    Rectangle { x: 0px; y: 4px; width: 1px; height: root.height - 8px; background: Theme.border; }
+    section-indicator := Rectangle {
+        x: 10px; y: Motion.reduce ? root.selection-y : root.animated-y;
+        width: root.width - 10px; height: 32px;
+        border-radius: Theme.control-radius; background: Theme.subtle;
+    }
+    // 引导线上的选中段，与选中层同步移动
+    Rectangle {
+        x: 0px; y: (Motion.reduce ? root.selection-y : root.animated-y) + 8px;
+        width: 1px; height: 16px; background: Theme.accent;
+    }
+    for item[index] in root.items: ActionButton {
+        x: 10px; y: index * root.stride; width: root.width - 10px; height: 32px;
+        text: item; compact: true; leading: true; flat: true; icon-motion: false;
+        accent-text: root.selected == index ? Theme.text : Theme.muted;
+        weight: root.selected == index ? 600 : 400;
+        enabled: !Updates.dialog;
+        clicked => { root.select(index); }
+    }
+}
+
+// 统一侧栏（参考 Linear）：品牌区 + 四个一级入口，选中项浅紫底 + 左侧强调条；
+// 下载与设置的二级入口作为选中项下方的缩进子菜单。窄窗口收成 64px 图标栏。
 export component WorkspaceNavigation inherits Rectangle {
     min-width: 0px;
     in property <bool> compact;
     background: Theme.canvas;
+    private property <length> item-height: 36px;
+    private property <length> item-stride: 38px;
+    private property <length> inset: root.compact ? 10px : 12px;
+    // 只有选中项下方会展开子菜单，所以选中项之前的入口位置固定。
+    private property <length> selected-y: main-nav.y + Workspace.page * root.item-stride;
+    private property <length> animated-y: selected-y;
+    animate animated-y { enabled: !Motion.reduce; duration: Motion.navigation; easing: MotionCurves.decelerate; }
     Rectangle { x: parent.width - 1px; width: 1px; background: Theme.border; }
-    VerticalLayout {
-        padding: root.compact ? 8px : 12px; spacing: 8px;
-        HorizontalLayout {
-            height: 56px; padding-left: root.compact ? 6px : 8px; spacing: 10px;
-            Icon { source: @image-url("../resources/icons/CloudArrowDown-fill.svg"); tint: Theme.green; width: 28px; preferred-height: 28px; }
-            if !root.compact: Label { text: "GitHubSP"; font-size: 18px; font-weight: 700; }
+
+    // 品牌区
+    HorizontalLayout {
+        x: root.compact ? 16px : 18px; y: 14px;
+        width: root.width - self.x - 12px; height: 40px; spacing: 10px;
+        Rectangle {
+            width: 30px;
+            Rectangle {
+                y: (parent.height - 30px) / 2; width: 30px; height: 30px;
+                border-radius: 8px; background: Theme.accent;
+                drop-shadow-blur: 4px; drop-shadow-offset-y: 1px; drop-shadow-color: Theme.shadow-strong;
+                Icon { x: 6px; y: 6px; source: @image-url("../resources/icons/CloudArrowDown-fill.svg"); tint: white; width: 18px; height: 18px; }
+            }
         }
+        if !root.compact: VerticalLayout {
+            alignment: center; spacing: 0px;
+            Label { text: "GitHubSP"; font-size: 14px; font-weight: 650; }
+            Muted { text: "Release 下载加速"; font-size: 11px; color: Theme.faint; }
+        }
+    }
+    if !root.compact: Muted { x: 20px; y: 70px; width: root.width - 32px; height: 16px; text: "工作区"; font-size: 11px; font-weight: 600; color: Theme.faint; }
+
+    primary-indicator := Rectangle {
+        x: root.inset;
+        y: Motion.reduce ? root.selected-y : root.animated-y;
+        width: root.width - 2 * self.x; height: root.item-height;
+        border-radius: Theme.control-radius; background: Theme.accent-soft;
+        Rectangle { x: 0px; y: 9px; width: 2px; height: parent.height - 18px; border-radius: 1px; background: Theme.accent; }
+    }
+    main-nav := VerticalLayout {
+        x: root.inset; y: root.compact ? 70px : 90px;
+        width: root.width - 2 * self.x; height: self.preferred-height;
+        spacing: root.item-stride - root.item-height;
         for item[index] in [
             { label: "下载", icon: @image-url("../resources/icons/DownloadSimple-regular.svg") },
             { label: "历史", icon: @image-url("../resources/icons/ClockCounterClockwise-regular.svg") },
-            { label: "收藏", icon: @image-url("../resources/icons/Star-regular.svg") }
+            { label: "收藏", icon: @image-url("../resources/icons/Star-regular.svg") },
+            { label: "设置", icon: @image-url("../resources/icons/GearSix-regular.svg") }
         ]: VerticalLayout {
             spacing: 4px;
             Rectangle {
-                height: 40px;
+                height: root.item-height;
                 ActionButton {
                     text: root.compact ? "" : item.label; help: item.label;
-                    icon: item.icon; icon-size: 20px; leading: !root.compact;
-                    font-size: 14px; weight: Workspace.page == index ? 650 : 400;
-                    flat: true; soft: Workspace.page == index; icon-motion: false;
-                    accent-text: Workspace.page == index ? Theme.green-hover : Theme.text;
+                    icon: item.icon; icon-size: 18px; leading: !root.compact;
+                    font-size: 13px; weight: Workspace.page == index ? 600 : 500;
+                    flat: true; icon-motion: false;
+                    accent-text: Workspace.page == index ? Theme.accent-text : Theme.text;
                     enabled: !Updates.dialog;
                     clicked => { Workspace.navigate(index); }
                 }
                 if index == 2 && Workspace.unread-updates > 0: Rectangle {
-                    x: parent.width - (root.compact ? 12px : 30px); y: root.compact ? 2px : 10px;
-                    width: root.compact ? 8px : 24px; height: root.compact ? 8px : 20px;
-                    border-radius: 10px; background: Theme.green;
-                    if !root.compact: Text { text: Workspace.unread-updates > 99 ? "99+" : Workspace.unread-updates; color: white; font-size: 11px; horizontal-alignment: center; vertical-alignment: center; }
+                    x: parent.width - (root.compact ? 14px : 34px); y: root.compact ? 6px : (parent.height - 18px) / 2;
+                    width: root.compact ? 8px : 26px; height: root.compact ? 8px : 18px;
+                    border-radius: 9px; background: Theme.accent;
+                    if !root.compact: Text { text: Workspace.unread-updates > 99 ? "99+" : Workspace.unread-updates; color: white; font-size: 10px; font-weight: 600; horizontal-alignment: center; vertical-alignment: center; }
                 }
             }
-            if index == 0 && Workspace.page == 0 && !root.compact: VerticalLayout {
-                spacing: 4px;
-                for label[section] in ["下载队列", "新建下载", "线路检测"]: Rectangle {
-                    height: 36px;
-                    ActionButton {
-                        text: label; font-size: 13px; leading: true; flat: true;
-                        soft: Workspace.download-section == section;
-                        accent-text: Workspace.download-section == section ? Theme.green-hover : Theme.muted;
-                        enabled: !Updates.dialog;
-                        clicked => { Workspace.select-download-section(section); }
-                    }
-                    if Workspace.download-section == section: Rectangle { x: 0px; y: 8px; height: 20px; width: 2px; border-radius: 1px; background: Theme.green; }
+            if index == 0 && Workspace.page == 0 && !root.compact: Rectangle {
+                height: 3 * 34px + 4px;
+                SectionNavigation {
+                    x: 18px; y: 0px; width: parent.width - 18px;
+                    items: ["下载队列", "新建下载", "线路检测"];
+                    selected: Workspace.download-section;
+                    select(index) => { Workspace.select-download-section(index); }
+                }
+            }
+            if index == 3 && Workspace.page == 3 && !root.compact: Rectangle {
+                height: 5 * 34px + 4px;
+                SectionNavigation {
+                    x: 18px; y: 0px; width: parent.width - 18px;
+                    items: ["下载设置", "窗口与提醒", "收藏检查", "数据管理", "软件更新与关于"];
+                    selected: Preferences.section;
+                    select(index) => { Workspace.select-settings-section(index); }
                 }
             }
         }
-        Rectangle { vertical-stretch: 1; }
-        ActionButton {
-            text: root.compact ? "" : "设置"; help: "设置";
-            icon: @image-url("../resources/icons/GearSix-regular.svg"); icon-size: 20px;
-            font-size: 14px; leading: !root.compact; flat: true; soft: Workspace.page == 3;
-            icon-motion: false; enabled: !Updates.dialog;
-            clicked => { Workspace.navigate(3); }
-        }
-        if !root.compact: Muted { text: "v0.3.0"; height: 24px; font-size: 11px; }
+    }
+    if !root.compact: HorizontalLayout {
+        x: 20px; y: root.height - 34px; width: root.width - 32px; height: 20px; spacing: 6px;
+        Rectangle { width: 6px; Rectangle { y: (parent.height - 6px) / 2; width: 6px; height: 6px; border-radius: 3px; background: Theme.success; } }
+        Muted { text: "v0.3.0 · 本地运行"; font-size: 11px; color: Theme.faint; }
     }
 }
 
-// 模块入口按剩余宽度等分；长文案换行，最小窗口也不隐藏模块。
+// 窄窗口保留完整模块名的分段标签，选中层平滑移动，不逐项销毁指示条。
 export component ModuleNavigation inherits Rectangle {
     min-width: 0px;
     in property <string> title;
@@ -72,25 +141,34 @@ export component ModuleNavigation inherits Rectangle {
     in property <[image]> icons;
     in property <int> selected;
     callback select(int);
-    height: root.width < 660px ? 52px : 42px;
-    Rectangle { y: parent.height - 1px; height: 1px; background: Theme.border; }
+    height: root.width < 660px ? 50px : 38px;
+    background: Theme.subtle; border-radius: Theme.control-radius + 2px;
+    private property <float> animated-index: selected;
+    animate animated-index { enabled: !Motion.reduce; duration: Motion.navigation; easing: MotionCurves.decelerate; }
+    selection := Rectangle {
+        x: 3px + (root.width - 6px) / max(1, root.items.length) * (Motion.reduce ? root.selected : root.animated-index);
+        y: 3px; width: (root.width - 6px) / max(1, root.items.length); height: root.height - 6px;
+        border-radius: Theme.control-radius; background: white;
+        border-width: 1px; border-color: Theme.border;
+        drop-shadow-blur: 3px; drop-shadow-offset-y: 1px; drop-shadow-color: Theme.shadow;
+    }
     HorizontalLayout {
-        spacing: 2px;
+        padding: 3px; spacing: 0px;
         for item[index] in root.items: Rectangle {
             horizontal-stretch: 1;
             ActionButton {
-                text: ""; help: item; flat: true;
+                text: ""; help: item; flat: true; icon-motion: false;
                 enabled: !Updates.dialog;
                 clicked => { root.select(index); }
             }
             Text {
-                x: 4px; y: 4px; width: parent.width - 8px; height: parent.height - 8px;
-                text: item; font-size: root.width < 660px ? 11px : 13px;
-                font-weight: root.selected == index ? 650 : 400;
-                color: root.selected == index ? Theme.green-hover : Theme.muted;
+                x: 4px; y: 2px; width: parent.width - 8px; height: parent.height - 4px;
+                text: item; font-size: root.width < 660px ? 11px : 12px;
+                font-weight: root.selected == index ? 600 : 500;
+                color: root.selected == index ? Theme.text : Theme.muted;
+                animate color { duration: Motion.fast; easing: ease-out; }
                 horizontal-alignment: center; vertical-alignment: center; wrap: word-wrap;
             }
-            if root.selected == index: Rectangle { x: 8px; y: parent.height - 2px; width: parent.width - 16px; height: 2px; background: Theme.green; }
         }
     }
 }

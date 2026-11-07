@@ -98,7 +98,7 @@ export component FavoritesPage inherits VerticalLayout {
                 Stat { title: "检查异常"; value: Favorites.failed; tone: 2; icon: @image-url("../resources/icons/WarningCircle-regular.svg"); }
             }
             HorizontalLayout { spacing: 16px; ActionButton { text: Favorites.busy ? "正在检查…" : "检查全部"; icon: @image-url("../resources/icons/Play-fill.svg"); primary: true; min-width: 100px; enabled: !Favorites.busy && Favorites.total > 0; clicked => { Favorites.action("", "check"); } } if Favorites.checking: ActionButton { text: "取消检查"; icon: @image-url("../resources/icons/X-regular.svg"); compact: true; clicked => { Favorites.cancel-check(); } } Muted { text: "上次检查：" + Favorites.checked; } Rectangle { horizontal-stretch: 1; } if Favorites.auto-download: Badge { text: "自动下载已开启"; tone: 1; } }
-            if Favorites.checking: VerticalLayout { spacing: 5px; Text { text: Favorites.checking-text; font-size: 11px; color: Theme.muted; } Rectangle { height: 5px; border-radius: 3px; background: Theme.border; Rectangle { width: parent.width * Favorites.checking-progress; height: parent.height; border-radius: 3px; background: Theme.green; } } }
+            if Favorites.checking: VerticalLayout { spacing: 5px; Text { text: Favorites.checking-text; font-size: 11px; color: Theme.muted; } Rectangle { height: 5px; border-radius: 3px; background: Theme.border; Rectangle { width: parent.width * Favorites.checking-progress; height: parent.height; border-radius: 3px; background: Theme.accent; } } }
             if Workspace.api-warning: Message { text: Workspace.api-status; }
             if Workspace.unread-updates > 0: HorizontalLayout {
                 spacing: 8px;
@@ -128,17 +128,18 @@ export component FavoritesPage inherits VerticalLayout {
                 favorite-list := ListView {
                     width: parent.width; height: parent.height;
                     property <int> columns: Favorites.list ? 1 : self.width > 1100px ? 3 : self.width > 740px ? 2 : 1;
-                    for index in ceil(Favorites.rows.length / self.columns): HorizontalLayout {
+                    for index in ceil(Favorites.rows.length / self.columns): bento-row := HorizontalLayout {
                         padding-bottom: Theme.card-gap; spacing: Theme.card-gap;
-                        for column in favorite-list.columns: VerticalLayout {
+                        for column in favorite-list.columns: bento-column := VerticalLayout {
                             horizontal-stretch: 1;
                             if index * favorite-list.columns + column < Favorites.rows.length: FavoriteCard {
                                 item: Favorites.rows[index * favorite-list.columns + column];
                                 card-key: self.item.repository;
                                 interactive: favorite-grid.active;
-                                origin-x: favorite-grid.origin-x;
-                                origin-y: favorite-grid.origin-y;
-                                claim(key, rect) => { favorite-grid.claim(key, rect); }
+                                // 行列局部几何提供内容坐标，纵向滚动只由共享指示层叠加一次。
+                                content-x: bento-row.x + bento-column.x + self.x;
+                                content-y: bento-row.y + bento-column.y + self.y;
+                                claim(key, rect, input, position) => { favorite-grid.claim(key, rect, input, position); }
                                 update-card(key, rect) => { favorite-grid.update-card(key, rect); }
                                 leave(key) => { favorite-grid.leave(key); }
                                 forget(key) => { favorite-grid.forget(key); }

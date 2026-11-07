@@ -1,11 +1,12 @@
 import { ListView } from "std-widgets.slint";
 import { Theme, Label, Muted, ActionButton, Icon, EmptyState } from "theme.slint";
 import { Reminder, UpdateNoticeRow } from "state.slint";
+import { Motion, MotionCurves } from "motion.slint";
 
 component BadgeLabel inherits Rectangle {
     in property <string> text;
-    min-width: 46px; height: 20px; border-radius: 6px; background: Theme.green-soft;
-    Text { text: parent.text; color: Theme.green-hover; font-size: 10px; font-weight: 650; horizontal-alignment: center; vertical-alignment: center; }
+    min-width: 46px; height: 20px; border-radius: 6px; background: Theme.accent-soft;
+    Text { text: parent.text; color: Theme.accent-text; font-size: 10px; font-weight: 650; horizontal-alignment: center; vertical-alignment: center; }
 }
 
 export component ReminderWindow inherits Window {
@@ -20,19 +21,19 @@ export component ReminderWindow inherits Window {
     in-out property <bool> entered: false;
     Rectangle {
         width: parent.width - 16px; height: parent.height - 16px; x: 8px;
-        y: root.entered ? 8px : 18px;
-        opacity: root.entered ? 1 : 0;
-        animate y { duration: 220ms; easing: cubic-bezier(0.2, 0, 0, 1); }
-        animate opacity { duration: 180ms; easing: ease-out; }
-        border-radius: 14px; background: white; border-width: 1px; border-color: Theme.border;
-        drop-shadow-blur: 22px; drop-shadow-color: #15254130; drop-shadow-offset-y: 6px;
+        y: root.entered ? 8px : 8px + Motion.reveal-distance;
+        opacity: root.entered || Motion.reduce ? 1 : Motion.page-opacity;
+        animate y { duration: Motion.emphasis; easing: MotionCurves.decelerate; }
+        animate opacity { duration: Motion.base; easing: ease-out; }
+        border-radius: Theme.panel-radius; background: white; border-width: 1px; border-color: Theme.border;
+        drop-shadow-blur: 22px; drop-shadow-color: Theme.shadow-strong; drop-shadow-offset-y: 6px;
         VerticalLayout {
             spacing: 0px;
             Rectangle {
-                height: 54px; background: Theme.blue-soft; border-radius: 14px;
+                height: 54px; background: Theme.surface-muted; border-radius: Theme.panel-radius;
                 HorizontalLayout {
                     padding-left: 16px; padding-right: 10px; spacing: 10px;
-                    Icon { source: @image-url("../resources/icons/Star-fill.svg"); width: 22px; tint: Theme.green; }
+                    Icon { source: @image-url("../resources/icons/Star-fill.svg"); width: 22px; tint: Theme.accent; }
                     VerticalLayout { spacing: 2px; Label { text: "收藏项目有新版本"; font-size: 15px; font-weight: 650; } Muted { text: Reminder.unread + " 项待查看 · 点击查看或下载"; font-size: 11px; } }
                     Rectangle { horizontal-stretch: 1; }
                     ActionButton { icon: @image-url("../resources/icons/X-regular.svg"); help: "稍后查看"; flat: true; compact: true; clicked => { Reminder.dismiss(); } }

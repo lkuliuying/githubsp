@@ -1,4 +1,4 @@
-use crate::{MainWindow, Reminder, RouteRow, TaskRow, UpdateNoticeRow, Workspace};
+use crate::{DetailSelection, MainWindow, Reminder, RouteRow, TaskRow, UpdateNoticeRow, Workspace};
 use githubsp_lib::model::{Snapshot, Task, TaskStatus, Verification};
 use slint::{ComponentHandle, Model, ModelRc, VecModel};
 use std::rc::Rc;
@@ -238,6 +238,30 @@ fn task_rows(tasks: &[Task]) -> Vec<TaskRow> {
 
 pub fn model<T: Clone + 'static>(rows: Vec<T>) -> ModelRc<T> {
     Rc::new(VecModel::from(rows)).into()
+}
+
+pub fn bind_detail_selection(window: &MainWindow) {
+    // 显式跟踪模型变化，让后台进度刷新、重排和删除都更新同一 ID 的详情。
+    fn selected<T: Clone + Default + 'static>(
+        rows: ModelRc<T>,
+        key: &str,
+        id: fn(&T) -> &str,
+    ) -> T {
+        let tracker = rows.model_tracker();
+        tracker.track_row_count_changes();
+        for index in 0..rows.row_count() {
+            tracker.track_row_data_changes(index);
+            if let Some(row) = rows.row_data(index) {
+                if key.is_empty() || id(&row) == key {
+                    return row;
+                }
+            }
+        }
+        rows.row_data(0).unwrap_or_default()
+    }
+    let selection = window.global::<DetailSelection>();
+    selection.on_task(|rows, key| selected(rows, key.as_str(), |row| row.id.as_str()));
+    selection.on_history(|rows, key| selected(rows, key.as_str(), |row| row.id.as_str()));
 }
 pub fn update_model<T: Clone + PartialEq + 'static>(old: ModelRc<T>, rows: Vec<T>) -> ModelRc<T> {
     if let Some(current) = old.as_any().downcast_ref::<VecModel<T>>() {

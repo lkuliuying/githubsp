@@ -1,5 +1,95 @@
 # 界面设计与验收
 
+## 2026-11-07：Linear 风格的主题与布局改造
+
+final result: passed（Slint 软件后端的组件、交互与布局范围）
+
+按用户已选的 Linear 风格与“视觉 + 布局结构调整”范围完成，参考 [Linear 官方重构说明](https://linear.app/now/how-we-redesigned-the-linear-ui)。浅灰画布、白色正文与紫色强调统一到 `theme.slint`，完成／警示／失败保留绿／黄／红的状态语义；面板 8px、控件 6px、顶栏 44px、宽屏侧栏 220px。四个入口统一常驻，下载与设置子菜单随所属模块展开；900px 以下收为 64px 图标栏，子导航保留完整文字。
+
+- 新建下载改为共享滑块的分段控件；队列与历史统一 100px / 紧凑 108px 行高、14px 文件名和居中的状态色点。宽屏下载快捷操作在悬停、选中或键盘聚焦时显现，紧凑行常显；减少动效时直接切换。历史色点表达下载状态，“文件缺失”仍为独立警示，不冒充下载失败。
+- 设置正文最大 760px，分组采用 13px 标题与细分隔线，底部保存、恢复默认和结果信息固定可达。更新、迁移及收藏提醒窗统一圆角、遮罩／阴影和短入场。独立提醒窗显示前同步主窗口合并后的减少动效偏好，仅增加 4 行 Rust 展示层胶水。
+- 导航、开关与页面采用减速曲线；主导航保持 220ms，弹窗 200ms，悬停与按下为短反馈。收藏原有虚拟列表、共享磁吸层、筛选与全部业务动作沿用。
+- 新增现有界面用例中的悬停显现与单次继续下载回归，保留既有键盘、模型重排／删除、分页、错误与弹窗交互断言。调整几何断言与夹具状态值以匹配新布局和真实状态语义。
+
+证据目录：`artifacts/verification/linear-redesign-20261107/`。首轮沙箱测试遇到临时目录拒绝访问与本地 HTTP 夹具连接失败，原日志保留在 `native-tests.log`；在项目内隔离临时目录、允许本机夹具的环境复核后通过，未修改业务代码或弱化断言。截图为隔离测试数据，软件后端 1:1 像素密度，覆盖 1448×1086、1040×740、720×520。首轮视觉检查修正色点垂直对齐与文件缺失的颜色语义；最终批次复核队列、历史、新建下载、设置、收藏及窄屏更新弹窗，未见内容重叠、关键操作越界。
+
+| 检查 | 实际结果 |
+| --- | --- |
+| `scripts/native-cargo.ps1 -CargoArguments @('test','-p','githubsp-native','--locked','--offline','--','--test-threads=1')` | 24 通过、0 失败、2 项按既有约定忽略；93.04s，`native-tests-final.log`。迁移隔离子进程由父用例调用通过。 |
+| Clippy `-p githubsp-native --all-targets --locked --offline -- -D warnings` | 通过，`clippy.log`；增量缓存不能硬链接时编译器回退为复制，不影响结果。 |
+| `cargo fmt --all -- --check`、`git diff --check` | 通过，`fmt.log`、`diff-check.log`。 |
+| Impeccable detector | 无发现（`[]`），`layout-detect.json`；该工具不能替代 Slint 截图与交互检查。 |
+| 响应式截图 | `ui-renders/` 共 161 张，包含三个窗口尺寸、各页面、空／错误／更新与数据迁移状态。 |
+
+开工前改动以 `before.patch` 和两个未跟踪文件备份保存，本轮差异单独记录为 `implementation.patch`；既有 `main.rs`、`presentation.rs` 改动经基线对照确认保留。README 中英文源码界面说明已同步。未提交、推送或发布，未覆盖正式包，未写入全局记忆。随后按用户请求完成 Debug 构建（2m26s）并启动试用：`native-desktop/target/x86_64-pc-windows-msvc/debug/githubsp-native.exe`，使用独立目录 `artifacts/trials/linear-redesign-20261107/preview-data`。真实主窗口标题“GitHubSP · 下载加速”、响应正常，隔离数据库已创建；记录见 `preview-build.log` 与 `preview-launch.json`。该调试构建未作为 Release 包发布，原生连续操作、帧率、触控与多档 DPI 由后续实机试用验收。
+
+---
+
+## 2026-11-06：下载队列与历史的列表＋详情侧栏
+
+final result: passed（Slint 布局与组件交互范围；原生连续操作与帧率未覆盖）
+
+用户选择本轮第三张概念图 `artifacts/verification/master-detail-20261106/selected-reference.png`。源图为 1086×1448 的双页面设计板，每个桌面窗口约 1062×618；实现使用 Slint 软件后端 1:1 像素密度，覆盖 1448×1086、1040×740、720×520。对比以页面内容区、阅读顺序和主从比例为准；保留已有原生标题栏、面包屑与实际业务字段，不声称整窗像素复刻。完整原图与实现截图已在同一批输入中对照，重点复核列表首行、详情文字、状态和底部分页。最终 1448px 队列与 1040px 历史截图再次确认顶部对齐、长文本及固定分页；1040×740 原尺寸已能直接辨读字段和按钮，作为局部检查视图，未另行放大裁剪。
+
+- `downloads.slint`：用一行摘要替代四块统计；任务行保留顺序编号、15px 文件名、来源、状态与常用操作。行高 100px / 紧凑 108px，已完成任务不再展示 100% 进度条及平均速度列。宽屏详情从页面顶部开始独立滚动，默认第一项；窄屏选择后在行下展开，提供收起。失败、线路恢复、换线建议及原有全部操作在详情中保留。
+- `history.slint` / `main.slint`：历史使用独立列表与详情，搜索、摘要及分页固定。下载状态和文件状态分别展示；文件缺失改用警示色，未将其视为下载失败。每页 20 条、手动搜索、删除末页回退均沿用原行为。数据模型不提供历史文件大小，因此未为匹配概念图虚构该字段。
+- `master-detail.slint`：复用可键盘操作的 `SelectableRow` 和可换行的 `DetailField`，沿用 Theme 与 Motion。长文件名、路径和链接可按字符换行；减少动效继续生效。
+- `presentation.rs` 与入口各少量胶水：从已有展示模型按稳定 ID 解析选中项，显式跟踪模型行和数量变更，刷新/重排保持选中对象，删除后回到仍存在的首项。未增加业务 API、数据结构、持久化配置或依赖。
+
+首次视觉检查定位并修正：行宽未约束而跨入详情栏；详情从工具栏下方开始；大窗口内布局拉伸或居中造成空白。现显式约束列表可见宽度、详情首选高度及顶部坐标，并对长文本换行。宽屏列表与详情分隔，最小窗口保留单列阅读和可滚动的行内详情。原有侧栏、字体、绿色及文件图标继续复用；不添加图片资产或 Web 运行时。
+
+| 复核面 | 证据与结果 |
+| --- | --- |
+| 字体、排版 | 沿用 Segoe UI / Noto Sans SC；列表文件名 15px、详情标题 18px / 文件名 16px、字段值 14px，次要信息 12–13px。长名称在列表省略、详情完整换行。 |
+| 布局、间距 | 任务 100/108px，历史 104/112px；正文达到 760px 时保留最大 320px 详情栏，24px 列间距。三种尺寸的 `master-detail-queue-*`、`master-detail-history-*`、`master-detail-history-inline-720x520.png`。 |
+| 颜色、状态 | 使用当前中性背景、白色正文、绿色选择与进度；文件缺失为警示色；完成、失败、未知大小与恢复状态保留真实字段。 |
+| 图标、素材 | 复用已有 Phosphor 文件、下载、目录等 SVG 与现有云下载标识。没有替换字体或新增光栅素材。 |
+| 文案、功能 | 保留实际排序、顺序编号、串行执行、最近 50 条结束记录与历史分页；概念图中的示例数值不写入正式数据。 |
+
+测试扩展 `master_detail_ui_tests.rs`，复用唯一软件事件循环：验证鼠标/键盘选中不发起业务动作、按钮只调用一次原操作、同一模型更新及重排/删除、历史翻页清理、空状态、三种尺寸和窄屏滚动。附近队列顺序回归继续验证优先级操作及全部原有页面流程；滚动辅助器按实际视口判断可见范围，不再套用旧表格页尾空间。中间失败日志及中断记录保留在本轮证据目录。一次旧迁移夹具出现 Windows 临时访问失败，串行复查已通过，未修改该业务模块或弱化断言。
+
+| 实际检查 | 结果 |
+| --- | --- |
+| `.\scripts\native-cargo.ps1 -CargoArguments @('test','-p','githubsp-native','--locked','--offline','--','--test-threads=1')` | 24 通过、2 项专用入口按既有约定忽略；迁移子进程由父用例调用通过。最终日志 `native-tests-7.log`，92.17s；包含更新弹窗期间禁用历史搜索、筛选、分页及详情操作的回归。 |
+| `cargo fmt --all -- --check`、`git diff --check` | 通过；`fmt.log`、`diff-check.log`。 |
+| Clippy `-p githubsp-native --all-targets --locked --offline -- -D warnings` | 通过，`clippy-final.log`。 |
+| Impeccable layout detector | 无发现（`[]`），`layout-detect.json`；该扫描不能替代原生界面验收。 |
+| `.\scripts\package-native-windows.ps1 -Offline -OutputDirectory 'artifacts/trials/master-detail-20261106'` | 最终 Release 构建通过，8m54s；280 个运行依赖节点及 PE 导入审计通过，`package-final.log`。 |
+| 最终包摘要与原生启动 | EXE、`SHA256SUMS.txt`、`acceptance.json` 三方摘要一致；真实主窗口标题“GitHubSP · 下载加速”、响应正常，隔离数据库已创建。记录 `preview-launch.json`。 |
+
+试用包为 `artifacts/trials/master-detail-20261106/GitHubSP-v0.3.0-windows-x64.exe`，58,489,344 字节，SHA-256 `589932884D94E2025BA98C66B12CB957A65DE25279F24E57A604E6E52C6A1892`。同目录 `Start-Preview.cmd` 使用独立 `preview-data` 目录；本轮已启动并保持主窗口打开，未关闭旧程序。初始试用目录没有预置任务，截图中的记录仅为测试夹具。包沿用源码版本号，未覆盖正式发布目录。
+
+README 中英文当前界面说明已同步；开工前既有未提交改动保存为 `before.patch`，未覆盖、提交、推送或发布，未写入全局记忆。原生 DX12 连续操作、60fps、触控与多档 DPI 仍需单独实机验收，软件截图不能证明这些结果。
+
+---
+
+## 2026-11-06：参考 Magpie 的布局与动效完善
+
+参考 [yetone/Magpie](https://github.com/yetone/magpie)、其 [app.css](https://github.com/yetone/magpie/blob/main/internal/gui/assets/app.css) 与本机已安装 Magpie 的实际窗口，借鉴浅灰画布、统一侧栏层级、白色分组和共享选中层。以当前 `7601859` 为基线，只修改 Slint 页面、定向组件测试和说明；下载、数据、网络接口、依赖版本与统一手动保存约定保持原样，没有引入参考项目的 Web 技术。
+
+- 主导航使用单层 220ms 选中反馈；下载和设置的二级入口复用 `SectionNavigation`。宽度不足 900px 时仍采用 64px 图标侧栏，在正文顶部提供完整模块名称；宽屏设置分区进入现有侧栏。
+- 设置内容按 `Theme.settings-width = 960px` 居中，保存、恢复默认和保存结果仍固定可达。队列保留全宽表格，收藏保留原网格断点、虚拟列表及磁吸层。
+- `ModuleNavigation` 共享标签选中层，快速反向切换从当前绘制位置继续。普通页面切换只位移 4px、不透明度从 94% 恢复，保持内容可读；收藏标题仍使用既有局部入场。
+- 按钮反馈收敛为底色与图标按下轻沉 1px，命中区和文字排版固定；平面按钮获得可见键盘焦点框。取消原全局图标旋转与扩散涟漪。新增参数均在 `motion.slint` 中，减少动效开启时选中层即时落位，位移归零。
+
+定向断言复用既有软件事件循环，验证主导航与标签的中间态、反向切换、减少动效中途开启、鼠标与键盘单次回调，以及 1448×1086、1040×740、720×520 的设置入口与保存栏。证据保存于 `artifacts/verification/magpie-refinement-20261106/`。首轮发现侧栏按钮高度与图标位移影响文字最小宽度，已改为显式二级按钮高度和独立图标位移。
+
+收藏滚动回归还定位到既有窗口坐标换算的重复偏移，以及滚动事件阶段布局尚未更新的问题：实际卡片上移 40px，指示框曾上移 120px 或停留原地。现由收藏列表的行、列和卡片局部几何直接提供内容坐标，磁吸只插值该坐标，滚动偏移在绘制时叠加。Slint 滚轮后会合成一次鼠标移动来刷新悬停；共享层过滤位置未变的刷新事件，避免记录虚拟行重排中的临时坐标，真实指针移动或按下时仍重新测量。回归以同一帧中卡片和指示框的实际几何对照，验证滚轮穿透、位移同步和框体对齐。
+
+| 实际命令或检查 | 结果 |
+| --- | --- |
+| `.\scripts\native-cargo.ps1 -CargoArguments @('test','-p','githubsp-native','--locked','--offline')` | 24 项通过、2 项专用入口按既有约定忽略；软件页面与动效回归通过，全套用时 137.91s。日志 `native-tests-11.log`；中间排查失败记录保留。 |
+| `.\scripts\native-cargo.ps1 -CargoArguments @('clippy','-p','githubsp-native','--all-targets','--locked','--offline','--','-D','warnings')` | 通过，日志 `clippy.log`。 |
+| `cargo fmt --all -- --check`、`git diff --check` | 通过，日志 `fmt.log`、`diff-check.log`。 |
+| 三种尺寸预览 | `ui-renders/magpie-settings-1448x1086.png`、`magpie-settings-1040x740.png`、`magpie-settings-720x520.png` 已复核；设置导航、完整标签与固定保存操作均在窗口内。 |
+| `.\scripts\package-native-windows.ps1 -Offline -OutputDirectory 'artifacts/trials/magpie-refinement-20261106'` | Release 构建通过（8m15s），280 个运行依赖节点声明不变，依赖树与 PE 导入静态审计通过；日志 `package.log`。产物 56,374,784 字节，EXE、`SHA256SUMS.txt` 与 `acceptance.json` 的摘要三方一致；记录见 `package-verification.json`。 |
+
+试用包位于 `artifacts/trials/magpie-refinement-20261106/GitHubSP-v0.3.0-windows-x64.exe`，SHA-256 为 `298934A5DD97848B4B1F38DB7442F986880B8FB0CF3A0D49BAA6B5DD6C546DC2`。双击同目录 `Start-Preview.cmd` 会传入独立的 `preview-data` 目录；该包沿用源码版本号，只作本地试用，没有覆盖正式发布目录。本轮未自动启动新包。
+
+原生窗口验收准备阶段，用户通过 Esc 停止了 Computer Use，之后未继续读取、点击或启动窗口。正常/减少动效的轨迹断言与预览来自软件后端，不能证明原生 DX12 的 60fps；本轮原生连续悬停、滚动、触控、多档 DPI 与新试用包启动尚未验证。保留现有系统动画偏好在启动时缓存的约定。README 与本页已同步组件约定，未修改全局记忆，未提交、推送或发布。
+
+---
+
 ## 2026-11-01：v0.3.0 发布验收
 
 final result: passed（构建、依赖与导入静态审计、摘要三方一致、中文隔离目录启动；干净系统、真实网络与多档 DPI 未覆盖）

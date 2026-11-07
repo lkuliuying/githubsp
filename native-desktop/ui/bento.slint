@@ -2,6 +2,7 @@ import { Motion, MotionCurves } from "motion.slint";
 import { Theme } from "theme.slint";
 
 export struct BentoRect { x: length, y: length, width: length, height: length }
+export enum BentoInput { hover, move, press }
 
 // 几何只在内容坐标中插值；滚动偏移在绘制时直接叠加。
 export component MagneticIndicator inherits Rectangle {
@@ -31,7 +32,7 @@ export component MagneticIndicator inherits Rectangle {
     animate opacity { enabled: !Motion.reduce; duration: root.fade-duration; easing: ease-out; }
     border-radius: radius;
     border-width: 1px;
-    border-color: Theme.green;
+    border-color: Theme.accent;
     background: transparent;
 }
 
@@ -43,16 +44,18 @@ export component BentoGrid inherits Rectangle {
     in property <easing> easing: MotionCurves.magnetic;
     in property <duration> gap-delay: Motion.magnetic-gap;
     in property <length> hover-outset: Motion.card-lift;
-    out property <length> origin-x: self.absolute-position.x - content-x;
-    out property <length> origin-y: self.absolute-position.y - content-y;
     out property <string> target-key;
     private property <BentoRect> target;
+    private property <length> geometry-scroll-x;
+    private property <length> geometry-scroll-y;
+    private property <Point> pointer-position;
+    private property <bool> pointer-known;
     private property <bool> interpolate;
     private property <bool> valid-target;
     private property <string> leaving-key;
     private property <bool> reduced: Motion.reduce;
     callback reset();
-    callback claim(string, BentoRect);
+    callback claim(string, BentoRect, BentoInput, Point);
     callback update-card(string, BentoRect);
     callback leave(string);
     callback forget(string);
@@ -63,18 +66,28 @@ export component BentoGrid inherits Rectangle {
         root.valid-target = false;
         root.interpolate = false;
     }
-    claim(key, rect) => {
-        if root.active && key != "" {
+    claim(key, rect, input, position) => {
+        // 滚轮会合成坐标未变的 move；只有真实指针变化才重新测量滚动中的目标。
+        let pointer-input = input == BentoInput.press || (input == BentoInput.move && (!root.pointer-known || root.pointer-position != position));
+        if input != BentoInput.hover { root.pointer-position = position; root.pointer-known = true; }
+        if root.active && key != "" && (pointer-input || (root.geometry-scroll-x == root.content-x && root.geometry-scroll-y == root.content-y)) {
             gap.stop();
             root.leaving-key = "";
             if key != root.target-key { root.interpolate = root.target-key != ""; }
             root.target = rect;
             root.target-key = key;
+            root.geometry-scroll-x = root.content-x;
+            root.geometry-scroll-y = root.content-y;
             root.valid-target = true;
         }
     }
     update-card(key, rect) => {
-        if root.active && root.target-key == key && key != "" { root.target = rect; }
+        if root.active && root.target-key == key && key != "" {
+            if root.geometry-scroll-x == root.content-x && root.geometry-scroll-y == root.content-y { root.target = rect; }
+            else if root.target.width != rect.width || root.target.height != rect.height {
+                root.target = { x: root.target.x, y: root.target.y, width: rect.width, height: rect.height };
+            }
+        }
     }
     leave(key) => {
         if root.target-key == key && key != "" {
@@ -85,6 +98,7 @@ export component BentoGrid inherits Rectangle {
     }
     forget(key) => { if root.target-key == key { root.reset(); } }
     changed active => { if !self.active { self.reset(); } }
+    changed width => { root.reset(); }
     changed reduced => { if self.reduced && self.leaving-key != "" { self.reset(); } }
     gap := Timer {
         running: false;
@@ -118,8 +132,8 @@ export component BentoGrid inherits Rectangle {
 export component BentoCard inherits Rectangle {
     in property <string> card-key;
     in property <bool> interactive: true;
-    in property <length> origin-x;
-    in property <length> origin-y;
+    in property <length> content-x: self.x;
+    in property <length> content-y: self.y;
     in property <duration> hover-duration: Motion.hover;
     in property <duration> press-duration: Motion.press;
     in property <easing> easing: MotionCurves.feedback;
@@ -131,11 +145,11 @@ export component BentoCard inherits Rectangle {
     private property <length> displacement;
     private property <color> surface-color: white;
     private property <BentoRect> bounds: {
-        x: self.absolute-position.x - origin-x,
-        y: self.absolute-position.y - origin-y + surface.y,
+        x: root.content-x,
+        y: root.content-y + surface.y,
         width: self.width, height: self.height
     };
-    callback claim(string, BentoRect);
+    callback claim(string, BentoRect, BentoInput, Point);
     callback update-card(string, BentoRect);
     callback leave(string);
     callback forget(string);
@@ -147,7 +161,7 @@ export component BentoCard inherits Rectangle {
     }
     changed bounds => { if root.hovered { root.update-card(root.card-key, root.bounds); } }
     changed hovered => {
-        if self.hovered { root.claim(root.card-key, root.bounds); }
+        if self.hovered { root.claim(root.card-key, root.bounds, BentoInput.hover, { x: 0px, y: 0px }); }
         else { root.leave(root.card-key); }
     }
     observer := TouchArea {
@@ -157,7 +171,10 @@ export component BentoCard inherits Rectangle {
                 root.forget(root.card-key);
             } else if event.kind == PointerEventKind.down || event.kind == PointerEventKind.move {
                 root.touch-pointer = event.touch-finger-id != 0;
-                if root.hovered { root.claim(root.card-key, root.bounds); }
+                if root.hovered {
+                    root.claim(root.card-key, root.bounds, event.kind == PointerEventKind.down ? BentoInput.press : BentoInput.move,
+                        { x: root.absolute-position.x + self.mouse-x, y: root.absolute-position.y + self.mouse-y });
+                }
             } else if event.kind == PointerEventKind.up && root.touch-pointer {
                 root.forget(root.card-key);
             }
@@ -174,7 +191,7 @@ export component BentoCard inherits Rectangle {
     states [
         pressed when root.interactive && observer.pressed: {
             displacement: root.press-depth;
-            surface-color: Theme.green-soft;
+            surface-color: Theme.accent-soft;
             in { animate displacement, surface-color { enabled: !Motion.reduce; duration: root.press-duration; easing: root.easing; } }
             out { animate displacement, surface-color { enabled: !Motion.reduce; duration: root.hover-duration; easing: root.easing; } }
         }

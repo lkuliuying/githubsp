@@ -2,6 +2,7 @@ import { ListView, ScrollView, ComboBox } from "std-widgets.slint";
 import { Theme, Panel, Heading, Input, ActionButton, Label, Muted, Badge, Message, Switch, Slider, Icon, SettingCard } from "theme.slint";
 import { Preferences, Storage, Updates, NoteBlock, Workspace } from "state.slint";
 import { ModuleNavigation } from "module-navigation.slint";
+import { Motion, MotionCurves } from "motion.slint";
 
 export component NotesView inherits ScrollView {
     in property <[NoteBlock]> blocks;
@@ -10,13 +11,13 @@ export component NotesView inherits ScrollView {
         spacing: 10px; padding: 2px;
         for block in root.blocks: Rectangle {
             min-height: block.kind == 3 ? table.preferred-height : block.kind == 2 ? code.preferred-height + 20px : rich.preferred-height + (block.kind == 4 ? 8px : 0px);
-            background: block.kind == 2 ? white : block.kind == 3 ? Theme.green-soft : transparent;
+            background: block.kind == 2 ? white : block.kind == 3 ? Theme.subtle : transparent;
             border-radius: 6px;
-            if block.kind == 4: Rectangle { width: 3px; background: #c9eddd; }
+            if block.kind == 4: Rectangle { width: 3px; background: Theme.strong-border; }
             code := Text { visible: block.kind == 2; x: 10px; y: 10px; width: parent.width - 20px; text: block.plain; color: Theme.text; font-size: 11px; font-family: "Consolas"; wrap: word-wrap; }
             table := VerticalLayout {
                 for row in block.table: Rectangle {
-                    min-height: cells.preferred-height; background: row.header ? Theme.green-soft : white;
+                    min-height: cells.preferred-height; background: row.header ? Theme.subtle : white;
                     border-width: 1px; border-color: Theme.border;
                     cells := HorizontalLayout {
                         for cell in row.cells: Rectangle {
@@ -31,7 +32,7 @@ export component NotesView inherits ScrollView {
                 text: block.content;
                 default-font-size: block.kind == 1 ? (block.level == 1 ? 17px : block.level == 2 ? 15px : 14px) : 12px;
                 default-color: block.kind == 4 ? Theme.muted : Theme.text;
-                link-color: Theme.green-hover;
+                link-color: Theme.accent-text;
                 link-clicked(url) => { Updates.open-link(url); }
             }
         }
@@ -41,7 +42,7 @@ export component NotesView inherits ScrollView {
 component FeatureExample inherits Rectangle {
     in property <int> kind;
     height: 160px;
-    border-radius: 10px; background: Theme.blue-soft;
+    border-radius: 10px; background: Theme.surface-muted;
     VerticalLayout {
         padding: 16px; spacing: 10px;
         Muted { text: "功能示意"; font-size: 11px; }
@@ -50,7 +51,7 @@ component FeatureExample inherits Rectangle {
                 padding: 12px; spacing: 8px;
                 HorizontalLayout {
                     spacing: 8px;
-                    Icon { source: root.kind == 0 ? @image-url("../resources/icons/Monitor-regular.svg") : @image-url("../resources/icons/CloudArrowDown-fill.svg"); tint: Theme.green; }
+                    Icon { source: root.kind == 0 ? @image-url("../resources/icons/Monitor-regular.svg") : @image-url("../resources/icons/CloudArrowDown-fill.svg"); tint: Theme.accent; }
                     Label { text: "GitHubSP"; font-weight: 600; }
                     Icon { source: root.kind == 0 ? @image-url("../resources/icons/Tray-regular.svg") : @image-url("../resources/icons/X-regular.svg"); width: 14px; preferred-height: 14px; }
                 }
@@ -66,7 +67,7 @@ component SpeedSettings inherits SettingCard {
     description: "为其他应用留出带宽，或充分利用当前网络。";
     icon: @image-url("../resources/icons/DownloadSimple-regular.svg");
     Rectangle {
-        height: 76px; background: Preferences.unlimited ? Theme.green-soft : Theme.subtle; border-radius: 10px;
+        height: 76px; background: Preferences.unlimited ? Theme.accent-soft : Theme.subtle; border-radius: 10px;
         HorizontalLayout {
             padding: 16px; spacing: 16px;
             VerticalLayout { spacing: 6px; Label { text: "不限速"; font-size: 15px; font-weight: 600; } Muted { text: "使用当前可用的下载速度"; } }
@@ -212,6 +213,8 @@ component DataSettings inherits VerticalLayout {
 }
 
 export component MigrationDialog inherits FocusScope {
+    private property <bool> entered;
+    Timer { interval: 1ms; running: !root.entered; triggered => { root.entered = true; } }
     init => { cancel-button.focus(); }
     key-pressed(event) => {
         if Storage.migrating { return accept; }
@@ -230,12 +233,16 @@ export component MigrationDialog inherits FocusScope {
         }
         return reject;
     }
-    Rectangle { background: #263f635c; }
+    Rectangle { background: Theme.overlay; }
     TouchArea {}
     Rectangle {
-        x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2;
+        x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2 + (root.entered ? 0px : Motion.page-distance);
+        opacity: root.entered ? 1 : Motion.page-opacity;
+        animate y, opacity { duration: Motion.emphasis; easing: MotionCurves.decelerate; }
         width: min(560px, parent.width - 32px); height: min(520px, parent.height - 32px);
-        background: white; border-radius: 14px;
+        background: white; border-radius: Theme.panel-radius;
+        border-width: 1px; border-color: Theme.border;
+        drop-shadow-blur: 24px; drop-shadow-offset-y: 8px; drop-shadow-color: Theme.shadow-strong;
         content := VerticalLayout {
             padding: 16px; spacing: 8px;
             Heading { title: Storage.migrating ? "正在迁移数据" : "更改数据目录"; icon: @image-url("../resources/icons/FolderOpen-regular.svg"); }
@@ -280,63 +287,70 @@ component UpdateSettings inherits VerticalLayout {
     }
 }
 
-export component SettingsPage inherits VerticalLayout {
+export component SettingsPage inherits Rectangle {
     min-width: 0px;
+    in property <bool> show-navigation: true;
     private property <int> section: Preferences.section;
     changed section => { settings-scroll.content-y = 0px; }
-    spacing: self.width < 800px ? 10px : 16px;
-    ModuleNavigation {
-        title: "设置";
-        items: ["下载设置", "窗口与提醒", "收藏检查", "数据管理", "软件更新与关于"];
-        icons: [@image-url("../resources/icons/DownloadSimple-regular.svg"), @image-url("../resources/icons/Monitor-regular.svg"), @image-url("../resources/icons/Star-regular.svg"), @image-url("../resources/icons/Package-regular.svg"), @image-url("../resources/icons/Info-regular.svg")];
-        selected: Preferences.section;
-        select(index) => { Workspace.select-settings-section(index); }
-    }
-    Panel {
-        vertical-stretch: 1;
-        background: white;
-        border-width: 0px;
-        VerticalLayout {
-            padding: 0px; spacing: 14px;
+    settings-content := VerticalLayout {
+        x: (root.width - self.width) / 2;
+        width: min(root.width, Theme.settings-width); height: root.height;
+        spacing: root.width < 800px ? 10px : 16px;
+        if root.show-navigation: ModuleNavigation {
+            title: "设置";
+            items: ["下载设置", "窗口与提醒", "收藏检查", "数据管理", "软件更新与关于"];
+            icons: [@image-url("../resources/icons/DownloadSimple-regular.svg"), @image-url("../resources/icons/Monitor-regular.svg"), @image-url("../resources/icons/Star-regular.svg"), @image-url("../resources/icons/Package-regular.svg"), @image-url("../resources/icons/Info-regular.svg")];
+            selected: Preferences.section;
+            select(index) => { Workspace.select-settings-section(index); }
+        }
+        Panel {
+            vertical-stretch: 1;
+            background: transparent;
+            border-width: 0px;
             VerticalLayout {
-                spacing: 6px;
-                Label {
-                text: Preferences.section == 0 ? "下载设置" : Preferences.section == 1 ? "窗口与提醒" : Preferences.section == 2 ? "收藏检查" : Preferences.section == 3 ? "数据管理" : "软件更新与关于";
-                font-size: 24px; font-weight: 650;
-                }
-                Muted { text: Preferences.section == 0 ? "调整下载带宽，让任务适合当前网络。" : Preferences.section == 1 ? "设置窗口行为与后台提醒方式。" : Preferences.section == 2 ? "及时获知应用内收藏项目的新版本。" : Preferences.section == 3 ? "管理本地应用记录，导出备份。" : "了解当前版本，获取更新与开源信息。"; }
-            }
-            settings-scroll := ScrollView {
-                content-width: self.visible-width;
-                vertical-stretch: 1;
+                padding: 0px; spacing: 14px;
                 VerticalLayout {
-                    padding-right: 8px; spacing: 16px;
-                    if Preferences.section == 0: SpeedSettings {}
-                    if Preferences.section == 1: WindowSettings {}
-                    if Preferences.section == 2: FavoriteSettings {}
-                    if Preferences.section == 3: DataSettings {}
-                    if Preferences.section == 4: UpdateSettings {}
-                    Rectangle { vertical-stretch: 1; }
+                    spacing: 6px;
+                    Label {
+                    text: Preferences.section == 0 ? "下载设置" : Preferences.section == 1 ? "窗口与提醒" : Preferences.section == 2 ? "收藏检查" : Preferences.section == 3 ? "数据管理" : "软件更新与关于";
+                    font-size: 24px; font-weight: 650;
+                    }
+                    Muted { text: Preferences.section == 0 ? "调整下载带宽，让任务适合当前网络。" : Preferences.section == 1 ? "设置窗口行为与后台提醒方式。" : Preferences.section == 2 ? "及时获知应用内收藏项目的新版本。" : Preferences.section == 3 ? "管理本地应用记录，导出备份。" : "了解当前版本，获取更新与开源信息。"; }
                 }
-            }
-            Rectangle { height: 1px; background: Theme.border; }
-            ScrollView {
-                height: root.width < 800px ? 30px : 24px;
-                content-width: self.visible-width;
-                VerticalLayout {
-                    Label { text: Preferences.message == "" ? "各模块修改统一保存后生效。" : Preferences.message; color: Preferences.saved ? Theme.green-hover : Preferences.message == "" ? Theme.muted : Theme.red; wrap: word-wrap; }
+                settings-scroll := ScrollView {
+                    content-width: self.visible-width;
+                    vertical-stretch: 1;
+                    VerticalLayout {
+                        padding-right: 8px; spacing: 16px;
+                        if Preferences.section == 0: SpeedSettings {}
+                        if Preferences.section == 1: WindowSettings {}
+                        if Preferences.section == 2: FavoriteSettings {}
+                        if Preferences.section == 3: DataSettings {}
+                        if Preferences.section == 4: UpdateSettings {}
+                        Rectangle { vertical-stretch: 1; }
+                    }
                 }
-            }
-            HorizontalLayout {
-                spacing: 12px;
-                ActionButton { text: "恢复全部默认"; icon: @image-url("../resources/icons/ArrowCounterClockwise-regular.svg"); compact: root.height < 500px; enabled: !Updates.dialog && (!Preferences.busy); clicked => { Preferences.reset(); } }
-                Rectangle { horizontal-stretch: 1; }
-                ActionButton { text: Preferences.busy ? "保存中…" : "保存全部设置"; icon: @image-url("../resources/icons/CheckCircle-regular.svg"); compact: root.height < 500px; primary: true; enabled: !Updates.dialog && (!Preferences.busy); clicked => { Preferences.save(); } }
+                Rectangle { height: 1px; background: Theme.border; }
+                ScrollView {
+                    height: root.width < 800px ? 30px : 24px;
+                    content-width: self.visible-width;
+                    VerticalLayout {
+                        Label { text: Preferences.message == "" ? "各模块修改统一保存后生效。" : Preferences.message; color: Preferences.saved ? Theme.success-text : Preferences.message == "" ? Theme.muted : Theme.red; wrap: word-wrap; }
+                    }
+                }
+                HorizontalLayout {
+                    spacing: 12px;
+                    ActionButton { text: "恢复全部默认"; icon: @image-url("../resources/icons/ArrowCounterClockwise-regular.svg"); compact: root.height < 500px; enabled: !Updates.dialog && (!Preferences.busy); clicked => { Preferences.reset(); } }
+                    Rectangle { horizontal-stretch: 1; }
+                    ActionButton { text: Preferences.busy ? "保存中…" : "保存全部设置"; icon: @image-url("../resources/icons/CheckCircle-regular.svg"); compact: root.height < 500px; primary: true; enabled: !Updates.dialog && (!Preferences.busy); clicked => { Preferences.save(); } }
+                }
             }
         }
     }
 }
 export component UpdateDialog inherits FocusScope {
+    private property <bool> entered;
+    Timer { interval: 1ms; running: !root.entered; triggered => { root.entered = true; } }
     init => { cancel-button.focus(); }
     key-pressed(event) => {
         if Updates.stage == 2 { return accept; }
@@ -361,12 +375,15 @@ export component UpdateDialog inherits FocusScope {
         }
         return reject;
     }
-    Rectangle { background: #263f635c; }
+    Rectangle { background: Theme.overlay; }
     TouchArea {}
     Panel {
         width: min(parent.width - 32px, 760px);
         height: min(parent.height - 32px, 680px);
-        x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2;
+        x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2 + (root.entered ? 0px : Motion.page-distance);
+        opacity: root.entered ? 1 : Motion.page-opacity;
+        animate y, opacity { duration: Motion.emphasis; easing: MotionCurves.decelerate; }
+        drop-shadow-blur: 24px; drop-shadow-offset-y: 8px; drop-shadow-color: Theme.shadow-strong;
         VerticalLayout {
             padding: 24px; spacing: 16px;
             Heading { title: "下载新版"; description: "选择版本并下载更新程序 · 当前 v0.3.0"; icon: @image-url("../resources/icons/DownloadSimple-regular.svg"); page: true; }
@@ -382,14 +399,14 @@ export component UpdateDialog inherits FocusScope {
                         background: Theme.subtle; min-height: attachment-content.preferred-height;
                         attachment-content := HorizontalLayout {
                             padding: 16px; spacing: 16px;
-                            Icon { source: @image-url("../resources/icons/Package-regular.svg"); width: 30px; preferred-height: 30px; tint: Updates.downloadable ? Theme.green : Theme.muted; }
+                            Icon { source: @image-url("../resources/icons/Package-regular.svg"); width: 30px; preferred-height: 30px; tint: Updates.downloadable ? Theme.accent : Theme.muted; }
                             VerticalLayout { spacing: 8px; Label { text: Updates.attachment; font-size: 14px; font-weight: 600; wrap: word-wrap; } Muted { text: Updates.attachment-detail; wrap: word-wrap; } }
                         }
                     }
                     Label { text: "所选版本更新说明"; font-size: 14px; font-weight: 600; }
                     if Updates.selected-notes.length > 0: NotesView { blocks: Updates.selected-notes; height: 230px; }
                     if Updates.selected-notes.length == 0: Muted { text: "此版本暂无更新说明。"; }
-                    if Updates.duplicate-task != "": Label { text: "发现相同版本的下载任务"; color: #b87400; font-weight: 600; }
+                    if Updates.duplicate-task != "": Label { text: "发现相同版本的下载任务"; color: Theme.warning-text; font-weight: 600; }
                     if Updates.dialog-message != "": Message { text: Updates.dialog-message; error: Updates.duplicate-task == ""; }
                     duplicate-button := ActionButton { collapsed: Updates.duplicate-task == ""; text: "继续 / 重试原任务"; enabled: Updates.duplicate-task != "" && Updates.stage == 0; clicked => { Updates.resume-duplicate(); } }
                 }

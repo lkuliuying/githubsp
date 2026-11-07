@@ -6,7 +6,7 @@ export component CompletionWindow inherits Window {
     height: 170px;
     no-frame: true;
     always-on-top: true;
-    background: Theme.blue-soft;
+    background: Theme.surface-muted;
     default-font-family: "Noto Sans SC";
     in property <string> message;
     in property <string> detail;
@@ -16,13 +16,13 @@ export component CompletionWindow inherits Window {
     out property <bool> hovering: area.has-hover;
     changed hovering => { root.hover(root.hovering); }
     Rectangle { x: 1px; y: 1px; width: parent.width - 2px; height: parent.height - 2px; background: white; border-width: 1px; border-color: Theme.border; border-radius: 12px; }
-    Rectangle { x: 1px; y: parent.height - 4px; height: 3px; width: parent.width - 2px; background: Theme.green; }
+    Rectangle { x: 1px; y: parent.height - 4px; height: 3px; width: parent.width - 2px; background: Theme.accent; }
     area := TouchArea {
         VerticalLayout {
             padding: 16px; spacing: 10px;
             HorizontalLayout {
                 spacing: 8px;
-                Icon { source: @image-url("../resources/icons/CloudArrowDown-fill.svg"); tint: Theme.green; }
+                Icon { source: @image-url("../resources/icons/CloudArrowDown-fill.svg"); tint: Theme.accent; }
                 Label { text: "GitHubSP"; font-weight: 600; }
                 Muted { text: "后台完成提醒"; font-size: 11px; horizontal-alignment: right; }
             }
@@ -44,7 +44,7 @@ export component AboutWindow inherits Window {
     preferred-height: 520px;
     min-width: 480px;
     min-height: 360px;
-    background: Theme.blue-soft;
+    background: Theme.surface-muted;
     default-font-family: "Noto Sans SC";
     in property <string> licenses;
     in property <int> license-index: 0;
@@ -57,7 +57,7 @@ export component AboutWindow inherits Window {
         spacing: 12px;
         HorizontalLayout {
             height: 76px; spacing: 18px;
-            Rectangle { width: 76px; border-radius: 16px; background: Theme.green;
+            Rectangle { width: 76px; border-radius: 16px; background: Theme.accent;
                 Icon { source: @image-url("../resources/icons/CloudArrowDown-fill.svg"); tint: white; width: 38px; preferred-height: 38px; x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2; }
             }
             VerticalLayout { spacing: 6px;

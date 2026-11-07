@@ -1,7 +1,7 @@
 import { ScrollView } from "std-widgets.slint";
 import { Theme, Label, Muted, Icon, ActionButton, Message } from "theme.slint";
 import { WorkspaceNavigation } from "module-navigation.slint";
-import { Motion } from "motion.slint";
+import { Motion, MotionCurves } from "motion.slint";
 import { Workspace, Preferences, Updates, Storage } from "state.slint";
 import { DownloadsPage } from "downloads.slint";
 import { HistoryPage } from "history.slint";
@@ -11,6 +11,7 @@ import "../resources/NotoSansSC-Regular.otf";
 export { CompletionWindow, AboutWindow } from "windows.slint";
 export { ReminderWindow } from "reminder.slint";
 export { Motion } from "motion.slint";
+export { DetailSelection } from "master-detail.slint";
 export { Workspace, Sources, History, Favorites, Preferences, Storage, Updates, Reminder, TaskRow, RouteRow, ReleaseRow, AssetRow, PreviewRow, HistoryRow, FavoriteRow, UpdateNoticeRow, NoteBlock, NoteTableRow } from "state.slint";
 
 export component MainWindow inherits Window {
@@ -22,7 +23,7 @@ export component MainWindow inherits Window {
     min-height: 520px;
     max-width: 100000px;
     max-height: 100000px;
-    background: white;
+    background: Theme.canvas;
     default-font-family: "Segoe UI";
     default-font-size: 13px;
     in-out property <bool> busy <=> Workspace.busy;
@@ -32,6 +33,7 @@ export component MainWindow inherits Window {
     in-out property <bool> page-entering: true;
     private property <int> current-page: Workspace.page;
     private property <bool> compact-navigation: root.width < 900px;
+    private property <length> sidebar-width: root.compact-navigation ? 64px : Theme.sidebar-width;
     changed current-page => { main-scroll.content-y = 0px; }
     callback hide-to-tray();
     callback exit();
@@ -41,22 +43,27 @@ export component MainWindow inherits Window {
     Rectangle {
         min-width: 0px; max-width: 100000px;
         min-height: 0px; max-height: 100000px;
-        WorkspaceNavigation { x: 0px; y: 0px; width: root.compact-navigation ? 64px : 192px; height: parent.height; compact: root.compact-navigation; }
+        WorkspaceNavigation { x: 0px; y: 0px; width: root.sidebar-width; height: parent.height; compact: root.compact-navigation; }
         VerticalLayout {
-            x: root.compact-navigation ? 64px : 192px;
+            x: root.sidebar-width;
             width: parent.width - self.x; height: parent.height;
             spacing: 0px;
             Rectangle {
-                height: 52px;
+                height: 44px;
+                background: white;
                 Rectangle { y: parent.height - 1px; height: 1px; background: Theme.border; }
                 HorizontalLayout {
-                    padding-left: 20px; padding-right: 16px; spacing: 12px;
-                    Icon { source: @image-url("../resources/icons/FolderOpen-regular.svg"); width: 16px; preferred-height: 16px; }
+                    padding-left: 20px; padding-right: 12px; spacing: 10px;
                     Muted {
-                        text: Workspace.page == 0 ? "下载 / " + (Workspace.download-section == 0 ? "下载队列" : Workspace.download-section == 1 ? "新建下载" : "线路检测") : Workspace.page == 1 ? "历史 / 下载记录" : Workspace.page == 2 ? "收藏 / 项目更新" : "设置 / 应用偏好";
-                        font-size: 12px;
+                        text: Workspace.page == 0 ? "下载" : Workspace.page == 1 ? "历史" : Workspace.page == 2 ? "收藏" : "设置";
+                        font-size: 12px; horizontal-stretch: 0; color: Theme.faint;
                     }
-                    if Workspace.unread-updates > 0: ActionButton { text: root.compact-navigation ? "更新 " + Workspace.unread-updates : Workspace.unread-updates + " 个项目有更新"; help: "查看收藏更新"; compact: true; flat: true; icon: @image-url("../resources/icons/Star-regular.svg"); enabled: !Updates.dialog; clicked => { Workspace.navigate(2); } }
+                    Muted { text: "/"; font-size: 12px; horizontal-stretch: 0; color: Theme.border; }
+                    Label {
+                        text: Workspace.page == 0 ? (Workspace.download-section == 0 ? "下载队列" : Workspace.download-section == 1 ? "新建下载" : "线路检测") : Workspace.page == 1 ? "下载记录" : Workspace.page == 2 ? "项目更新" : (Preferences.section == 0 ? "下载设置" : Preferences.section == 1 ? "窗口与提醒" : Preferences.section == 2 ? "收藏检查" : Preferences.section == 3 ? "数据管理" : "软件更新与关于");
+                        font-size: 12px; font-weight: 600;
+                    }
+                    if Workspace.unread-updates > 0: ActionButton { text: root.compact-navigation ? "更新 " + Workspace.unread-updates : Workspace.unread-updates + " 个项目有更新"; help: "查看收藏更新"; compact: true; soft: true; icon: @image-url("../resources/icons/Star-regular.svg"); enabled: !Updates.dialog; clicked => { Workspace.navigate(2); } }
                     ActionButton { text: root.compact-navigation ? "" : "收起到托盘"; help: "收起到托盘"; icon: @image-url("../resources/icons/Tray-regular.svg"); flat: true; compact: true; enabled: !Updates.dialog; clicked => { root.hide-to-tray(); } }
                 }
             }
@@ -84,21 +91,21 @@ export component MainWindow inherits Window {
                 Rectangle {
                     vertical-stretch: 1; min-height: 120px; clip: true;
                     page-body := Rectangle {
-                        x: Workspace.page == 2 || root.page-entering ? 0px : 8px;
+                        x: Workspace.page == 2 || root.page-entering ? 0px : Motion.page-distance;
                         width: parent.width; height: parent.height;
-                        animate x { enabled: Workspace.page != 2; duration: Motion.base; easing: cubic-bezier(0.2, 0, 0, 1); }
-                        opacity: Workspace.page == 2 || root.page-entering ? 1 : 0;
+                        animate x { enabled: Workspace.page != 2; duration: Motion.base; easing: MotionCurves.decelerate; }
+                        opacity: Workspace.page == 2 || root.page-entering ? 1 : Motion.page-opacity;
                         animate opacity { enabled: Workspace.page != 2; duration: Motion.base; easing: ease-out; }
                         if Workspace.page == 0: DownloadsPage { width: parent.width; height: parent.height; show-navigation: root.compact-navigation; }
-                        if Workspace.page == 3: SettingsPage { width: parent.width; height: parent.height; }
+                        if Workspace.page == 3: SettingsPage { width: parent.width; height: parent.height; show-navigation: root.compact-navigation; }
+                        if Workspace.page == 1: HistoryPage { width: parent.width; height: parent.height; }
                         main-scroll := ScrollView {
-                            visible: Workspace.page == 1 || Workspace.page == 2;
+                            visible: Workspace.page == 2;
                             enabled: self.visible && !Updates.dialog;
                             width: parent.width; height: parent.height; content-width: self.visible-width;
                             VerticalLayout {
                                 min-width: 0px;
                                 padding-right: 8px;
-                                if Workspace.page == 1: HistoryPage {}
                                 if Workspace.page == 2: FavoritesPage { entered: root.page-entering; }
                             }
                         }

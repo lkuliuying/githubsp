@@ -1,9 +1,12 @@
-param([Parameter(Mandatory = $true)][string]$Executable)
+param([Parameter(Mandatory = $true)][string]$Executable, [string]$OutputDirectory)
 $ErrorActionPreference = 'Stop'
 $startupRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $startupExe = (Resolve-Path -LiteralPath $Executable).Path
 if (-not $startupExe.StartsWith($startupRoot + [IO.Path]::DirectorySeparatorChar,[StringComparison]::OrdinalIgnoreCase)) { throw '仅验收当前工作区内的原生产物。' }
-$startupOutput = Join-Path $startupRoot ('artifacts/verification/startup-' + [DateTime]::UtcNow.ToString('yyyyMMdd-HHmmss'))
+$startupOutput = if ($OutputDirectory) {
+    [IO.Path]::GetFullPath($(if ([IO.Path]::IsPathRooted($OutputDirectory)) { $OutputDirectory } else { Join-Path $startupRoot $OutputDirectory }))
+} else { Join-Path $startupRoot ('artifacts/verification/startup-' + [DateTime]::UtcNow.ToString('yyyyMMdd-HHmmss')) }
+if (-not $startupOutput.StartsWith((Join-Path $startupRoot 'artifacts') + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) { throw '启动验收证据仅写入当前工作区 artifacts 目录。' }
 $startupData = Join-Path $startupOutput '中文 隔离数据'
 New-Item -ItemType Directory -Path $startupData | Out-Null
 $startupTimer = [Diagnostics.Stopwatch]::StartNew()
