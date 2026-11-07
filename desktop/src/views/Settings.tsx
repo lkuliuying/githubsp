@@ -611,7 +611,7 @@ export function Settings() {
               >
                 <Preference
                   title="GitHubSP"
-                  description={`版本 ${info?.version ?? "0.3.0"}`}
+                  description={`版本 ${info?.version ?? "0.3.1"}`}
                   keywords="检查应用更新 版本"
                 >
                   <img

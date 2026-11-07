@@ -7,9 +7,9 @@
 
 面向 Windows 的 GitHub Release 附件下载工具，使用 **Tauri 2 + React + TypeScript + Rust**，提供安装版和免安装版。
 
-[English](#english) · [发布页](https://github.com/lkuliuying/githubsp/releases) · [问题反馈](https://github.com/lkuliuying/githubsp/issues)
+[English](#english) · [下载 v0.3.1](https://github.com/lkuliuying/githubsp/releases/tag/v0.3.1) · [问题反馈](https://github.com/lkuliuying/githubsp/issues)
 
-> 当前源码已迁移至 Tauri。新的安装版和免安装版已在本地构建，尚未发布到 GitHub Releases；历史 v0.3.0 发布附件使用 Slint，与当前界面及 WebView2 运行条件不同。
+> v0.3.1 发布 Tauri 桌面入口，同时提供安装版和免安装版。历史 v0.3.0 发布附件使用 Slint，与当前界面及 WebView2 运行条件不同。更新内容见 [v0.3.1 发布说明](docs/v0.3.1.md)。
 
 ![下载队列，使用模拟数据展示](docs/images/queue.png)
 
@@ -43,14 +43,14 @@ https://github.com/{owner}/{repo}/releases/latest/download/{filename}
 
 | 文件 | 使用方式 |
 | --- | --- |
-| `GitHubSP-v<版本>-windows-x64-Setup.exe` | 当前用户安装；缺失 WebView2 时下载并安装 Evergreen Runtime。 |
-| `GitHubSP-v<版本>-windows-x64-Portable.zip` | 解压完整目录后运行 `GitHubSP.exe`；需要系统已有 WebView2。 |
+| [GitHubSP-v0.3.1-windows-x64-Setup.exe](https://github.com/lkuliuying/githubsp/releases/download/v0.3.1/GitHubSP-v0.3.1-windows-x64-Setup.exe) | 当前用户安装；缺失 WebView2 时下载并安装 Evergreen Runtime。 |
+| [GitHubSP-v0.3.1-windows-x64-Portable.zip](https://github.com/lkuliuying/githubsp/releases/download/v0.3.1/GitHubSP-v0.3.1-windows-x64-Portable.zip) | 解压完整目录后运行 `GitHubSP.exe`；需要系统已有 WebView2。 |
 | `SHA256SUMS.txt` | 对照文件名校验安装包和 ZIP 的 SHA-256。 |
 
 试用前退出旧版。普通免安装模式默认仍使用 `%LOCALAPPDATA%\com.githubsp.desktop`，并遵循已保存的数据位置；免安装不等于数据随程序移动。需要随身数据时，可在 exe 旁创建空文件 `portable-mode.flag`；独立测试可使用 `--data-dir <绝对路径>`。具体规则、备份及恢复见 [数据与存储](docs/data-storage.md)。
 
 ```powershell
-Get-FileHash .\GitHubSP-v0.3.0-windows-x64-Portable.zip -Algorithm SHA256
+Get-FileHash .\GitHubSP-v0.3.1-windows-x64-Portable.zip -Algorithm SHA256
 Get-Content .\SHA256SUMS.txt
 .\GitHubSP.exe --data-dir "F:\GitHubSP-试用"
 ```
@@ -118,7 +118,7 @@ GitHubSP 自有代码使用 [MIT 许可](LICENSE)。页面骨架与动效改编�
 
 GitHubSP is a Windows GitHub Release asset downloader built with **Tauri 2, React, TypeScript and Rust**. It supports a serial download queue, pause/resume, release browsing, batch previews, history, favorites, route diagnostics, and searchable settings.
 
-The current Tauri source produces an NSIS installer and a portable ZIP. Both use WebView2; the installer can download the runtime when missing, while the lightweight ZIP needs an existing runtime. The new UI has been built locally and has not been published to GitHub Releases. Historical v0.3.0 assets use Slint.
+The current Tauri source produces an NSIS installer and a portable ZIP. Both use WebView2; the installer can download the runtime when missing, while the lightweight ZIP needs an existing runtime. Version v0.3.1 publishes both formats on GitHub Releases. Historical v0.3.0 assets use Slint.
 
 Exit older versions before running a build. Portable normally shares the configured application data directory; `portable-mode.flag` beside the executable selects a local `data/` directory, and `--data-dir <absolute path>` selects isolated test data. Private repositories, Git clone, auto-generated source archives and automatic installation are not supported.
 

@@ -2241,7 +2241,7 @@ dependencies = [
 
 [[package]]
 name = "githubsp-core"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "dunce",
  "futures-util",
@@ -2264,7 +2264,7 @@ dependencies = [
 
 [[package]]
 name = "githubsp-desktop"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "githubsp-core",
  "rfd",
@@ -2280,7 +2280,7 @@ dependencies = [
 
 [[package]]
 name = "githubsp-native"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "githubsp-core",
  "i-slint-backend-testing",
