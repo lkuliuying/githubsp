@@ -21,6 +21,7 @@ pub struct Service {
     pub migration_lock: Mutex<Option<crate::platform::DirectoryLock>>,
     pub closing: AtomicBool,
     pub exit_ready: AtomicBool,
+    pub agent_stop: watch::Sender<bool>,
 }
 
 impl Service {
@@ -28,7 +29,11 @@ impl Service {
         directory: PathBuf,
         locations: Option<githubsp_lib::relocation::Locations>,
     ) -> Result<Arc<Self>, String> {
-        let engine = Engine::production().map_err(|e| e.to_string())?;
+        let store = githubsp_lib::store::Store::open(&directory.join("tasks.sqlite3"))
+            .map_err(|e| e.to_string())?;
+        let settings = store.settings().map_err(|e| e.to_string())?;
+        store.close().map_err(|e| e.to_string())?;
+        let engine = Engine::production_with(&settings.network).map_err(|e| e.to_string())?;
         let catalog = Catalog::new(engine.network().clone());
         let (send, state) = watch::channel(None::<Arc<Snapshot>>);
         let initial = send.clone();
@@ -53,7 +58,8 @@ impl Service {
             manager.snapshot().await.map_err(|e| e.to_string())?,
         )));
         let library = Library::new(catalog.clone(), manager.clone());
-        Ok(Arc::new(Self {
+        let (agent_stop, _) = watch::channel(false);
+        let service = Arc::new(Self {
             directory,
             locations,
             manager,
@@ -64,11 +70,20 @@ impl Service {
             migration_lock: Mutex::new(None),
             closing: AtomicBool::new(false),
             exit_ready: AtomicBool::new(false),
-        }))
+            agent_stop,
+        });
+        if settings.agent.enabled {
+            if let Err(error) = crate::agent::start(service.clone()) {
+                service.shutdown().await?;
+                return Err(error);
+            }
+        }
+        Ok(service)
     }
 
     pub async fn shutdown(&self) -> Result<(), String> {
         self.closing.store(true, Ordering::Release);
+        self.agent_stop.send_replace(true);
         self.catalog.stop();
         self.library.stop();
         self.manager

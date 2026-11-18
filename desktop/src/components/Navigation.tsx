@@ -4,9 +4,7 @@ import { useLayoutEffect, useRef } from "react";
 import {
   Download,
   Plus,
-  Network,
-  History,
-  Bookmark,
+  LayoutGrid,
   Settings,
 } from "lucide-react";
 import { navigate, useWorkspace, type View } from "@/lib/api";
@@ -15,9 +13,7 @@ import { unread } from "@/lib/model";
 const items = [
   { view: "queue", label: "下载队列", icon: Download },
   { view: "new", label: "新建下载", icon: Plus },
-  { view: "history", label: "下载历史", icon: History },
-  { view: "favorites", label: "项目收藏", icon: Bookmark },
-  { view: "routes", label: "线路检测", icon: Network },
+  { view: "software", label: "我的软件", icon: LayoutGrid },
   { view: "settings", label: "设置", icon: Settings },
 ] as const;
 const response = 0.42,
@@ -127,7 +123,7 @@ export function Navigation({ reduced }: { reduced: boolean }) {
                   }
                 </small>
               )}
-            {key === "favorites" && updates > 0 && <small>{updates}</small>}
+            {key === "software" && updates > 0 && <small>{updates}</small>}
           </button>
         ))}
       </nav>

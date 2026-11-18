@@ -227,6 +227,8 @@ enum Mode {
     RecoverAfterProbe,
     SelectiveUnavailable,
     Crawl,
+    /// 测速请求也很慢，模拟低于 50 KB/s 的网络。
+    CrawlProbe,
 }
 
 struct Fixture {
@@ -302,6 +304,7 @@ impl Fixture {
         Engine {
             network: self.network.clone(),
             limiter: Arc::new(crate::limiter::RateLimiter::default()),
+            connections: Arc::default(),
         }
     }
 
@@ -502,7 +505,7 @@ async fn serve(
         if matches!(mode, Mode::Slow | Mode::SelectiveUnavailable) && !is_probe {
             tokio::time::sleep(Duration::from_millis(12)).await;
         }
-        if mode == Mode::Crawl && !is_probe {
+        if mode == Mode::Crawl && !is_probe || mode == Mode::CrawlProbe {
             tokio::time::sleep(Duration::from_millis(120)).await;
         }
         if socket.write_all(chunk).await.is_err() {
@@ -962,10 +965,11 @@ async fn retries_transient_errors_and_respects_long_retry_after() {
 }
 
 #[tokio::test]
-async fn uses_two_ranges_for_large_files() {
+async fn splits_large_files_by_connection_setting() {
     let fixture = Fixture::new(Mode::Range, 16 * 1024 * 1024).await;
     let directory = tempfile::tempdir().unwrap();
-    fixture
+    // 默认 4 个连接：每段 4 MiB。
+    let result = fixture
         .engine()
         .run(
             record(directory.path()),
@@ -974,9 +978,124 @@ async fn uses_two_ranges_for_large_files() {
         )
         .await
         .unwrap();
+    assert_eq!(std::fs::read(result.path).unwrap(), *fixture.bytes);
+    {
+        let requests = fixture.requests.lock().unwrap();
+        for range in [
+            "0-4194303",
+            "4194304-8388607",
+            "8388608-12582911",
+            "12582912-16777215",
+        ] {
+            assert!(requests.iter().any(|request| request == range), "{range}");
+        }
+    }
+    // 设置为 2 个连接时只分两段。
+    fixture.requests.lock().unwrap().clear();
+    let engine = fixture.engine();
+    engine.connections.set(2);
+    let other = tempfile::tempdir().unwrap();
+    engine
+        .run(
+            record(other.path()),
+            CancellationToken::new(),
+            Reporter::default(),
+        )
+        .await
+        .unwrap();
     let requests = fixture.requests.lock().unwrap();
     assert!(requests.iter().any(|request| request == "0-8388607"));
     assert!(requests.iter().any(|request| request == "8388608-16777215"));
+    assert!(!requests.iter().any(|request| request == "0-4194303"));
+}
+
+#[tokio::test]
+async fn slow_probe_uses_partial_sample_instead_of_timing_out() {
+    let fixture = Fixture::new(Mode::CrawlProbe, 2 * 1024 * 1024).await;
+    let source = parse_release_url(SOURCE).unwrap();
+    let probe = fixture
+        .network
+        .probe(
+            fixture.network.routes[0].clone(),
+            &source,
+            None,
+            &CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+    assert!(probe.bytes >= crate::network::PROBE_MIN_SAMPLE);
+    assert!(probe.bytes < crate::network::PROBE_BYTES);
+    assert_eq!(probe.total, Some(2 * 1024 * 1024));
+    assert!(probe.range_supported);
+}
+
+#[tokio::test]
+async fn segmented_download_pauses_resumes_and_assembles_identical_file() {
+    let fixture = Fixture::new(Mode::Slow, 8 * 1024 * 1024).await;
+    let root = tempfile::tempdir().unwrap();
+    let manager = Manager::start(
+        &root.path().join("tasks.sqlite3"),
+        fixture.engine(),
+        Arc::new(|_| {}),
+    )
+    .unwrap();
+    let id = manager
+        .create(SOURCE.into(), root.path().into())
+        .await
+        .unwrap()
+        .tasks[0]
+        .id
+        .clone();
+    wait_for(&manager, |s| s.tasks[0].downloaded > 512 * 1024).await;
+    manager.action(id.clone(), Action::Pause).await.unwrap();
+    let paused = wait_for(&manager, |s| s.tasks[0].status == TaskStatus::Paused).await;
+    assert!(paused.tasks[0].downloaded < 8 * 1024 * 1024);
+    let before = fixture.requests.lock().unwrap().len();
+    manager.action(id, Action::Resume).await.unwrap();
+    let done = wait_for(&manager, |s| s.tasks[0].status == TaskStatus::Completed).await;
+    assert_eq!(
+        std::fs::read(done.tasks[0].final_path.as_ref().unwrap()).unwrap(),
+        *fixture.bytes
+    );
+    // 默认 4 段；续传请求从各段已下载的位置继续，而不是从每段开头重下。
+    let requests = fixture.requests.lock().unwrap();
+    let starts: Vec<u64> = requests[before..]
+        .iter()
+        .filter(|range| range.as_str() != "0-524287")
+        .filter_map(|range| range.split('-').next()?.parse().ok())
+        .collect();
+    let boundaries = [0, 2 * 1024 * 1024, 4 * 1024 * 1024, 6 * 1024 * 1024];
+    assert!(starts.iter().any(|start| !boundaries.contains(start)));
+    manager.shutdown().await.unwrap();
+}
+
+#[test]
+fn part_plan_respects_threshold_minimum_segment_and_limit() {
+    use crate::engine::plan_parts;
+    const MIB: u64 = 1024 * 1024;
+    // 小于 2 MiB、不支持分段或大小未知时只用一个连接。
+    assert_eq!(plan_parts(Some(MIB), true, 4), vec![(0, Some(MIB - 1))]);
+    assert_eq!(plan_parts(Some(10 * MIB), false, 4).len(), 1);
+    assert_eq!(plan_parts(None, true, 4), vec![(0, None)]);
+    // 每段至少 1 MiB：3 MiB 最多分 3 段。
+    assert_eq!(plan_parts(Some(3 * MIB), true, 8).len(), 3);
+    // 连接数上限为 8，范围首尾相接且覆盖整个文件。
+    let total = 100 * MIB + 7;
+    let parts = plan_parts(Some(total), true, 20);
+    assert_eq!(parts.len(), 8);
+    let mut next = 0;
+    for (start, end) in &parts {
+        assert_eq!(*start, next);
+        next = end.unwrap() + 1;
+    }
+    assert_eq!(next, total);
+}
+
+/// 这些测试验证单连接下的续传偏移和换线逻辑，显式关闭分段下载。
+pub(crate) async fn single_connection(manager: &Manager) {
+    let mut settings = manager.snapshot().await.unwrap().settings;
+    settings.connections = 1;
+    manager.settings(settings).await.unwrap();
 }
 
 async fn wait_for(manager: &Manager, condition: impl Fn(&Snapshot) -> bool) -> Snapshot {
@@ -1005,6 +1124,7 @@ async fn queue_pause_resume_duplicate_requests_and_cancellation() {
         Arc::new(|_| {}),
     )
     .unwrap();
+    single_connection(&manager).await;
     let first = manager
         .create(SOURCE.into(), root.path().into())
         .await
@@ -1107,6 +1227,7 @@ async fn data_directory_migration_preserves_active_and_queued_downloads_and_resu
         Arc::new(|_| {}),
     )
     .unwrap();
+    single_connection(&manager).await;
     manager
         .create(SOURCE.into(), downloads.clone())
         .await
@@ -1292,6 +1413,7 @@ async fn detects_changed_partial_files_before_resuming() {
     let root = tempfile::tempdir().unwrap();
     let database = root.path().join("tasks.sqlite3");
     let manager = Manager::start(&database, fixture.engine(), Arc::new(|_| {})).unwrap();
+    single_connection(&manager).await;
     manager
         .create(SOURCE.into(), root.path().into())
         .await
@@ -1306,8 +1428,9 @@ async fn detects_changed_partial_files_before_resuming() {
     bytes[0] ^= 0xff;
     std::fs::write(path, bytes).unwrap();
     let prior_requests = fixture.requests.lock().unwrap().len();
-    let result = fixture
-        .engine()
+    let engine = fixture.engine();
+    engine.connections.set(1);
+    let result = engine
         .run(record, CancellationToken::new(), Reporter::default())
         .await
         .unwrap();
@@ -1425,3 +1548,397 @@ async fn enforces_redirect_hosts_https_and_hop_limit() {
 
 #[path = "route_experience_tests.rs"]
 mod route_experience_tests;
+
+#[tokio::test]
+async fn agent_request_is_atomic_replayable_and_retains_hash_after_restart() {
+    let fixture = Fixture::new(Mode::Slow, 100_000).await;
+    let root = tempfile::tempdir().unwrap();
+    let database = root.path().join("agent.sqlite3");
+    let manager = Manager::start(&database, fixture.engine(), Arc::new(|_| {})).unwrap();
+    let options = crate::model::CreateOptions {
+        request_key: Some("session.request-1".into()),
+        ..Default::default()
+    };
+    let (one, two) = tokio::join!(
+        manager.create_with(SOURCE.into(), root.path().into(), options.clone()),
+        manager.create_with(SOURCE.into(), root.path().into(), options.clone())
+    );
+    one.unwrap();
+    two.unwrap();
+    let first = manager
+        .agent_task("session.request-1".into())
+        .await
+        .unwrap();
+    assert_eq!(manager.snapshot().await.unwrap().tasks.len(), 1);
+    assert!(manager
+        .create_with(
+            SOURCE.replace("file.bin", "different.bin"),
+            root.path().into(),
+            options.clone()
+        )
+        .await
+        .unwrap_err()
+        .message
+        .contains("不同下载参数"));
+    manager
+        .action(first.id.clone(), Action::Pause)
+        .await
+        .unwrap();
+    wait_for(&manager, |snapshot| {
+        snapshot.tasks[0].status == TaskStatus::Paused
+    })
+    .await;
+    manager.shutdown().await.unwrap();
+    let reopened = Manager::start(&database, fixture.engine(), Arc::new(|_| {})).unwrap();
+    reopened
+        .create_with(SOURCE.into(), root.path().into(), options.clone())
+        .await
+        .unwrap();
+    assert_eq!(
+        reopened
+            .agent_task("session.request-1".into())
+            .await
+            .unwrap()
+            .id,
+        first.id
+    );
+    reopened.action(first.id, Action::Resume).await.unwrap();
+    let done = wait_for(&reopened, |snapshot| {
+        snapshot.tasks[0].status == TaskStatus::Completed
+    })
+    .await;
+    assert_eq!(
+        done.tasks[0].details.sha256.as_deref(),
+        Some(format!("{:x}", Sha256::digest(&*fixture.bytes)).as_str())
+    );
+    reopened
+        .create_with(SOURCE.into(), root.path().into(), options)
+        .await
+        .unwrap();
+    assert_eq!(reopened.snapshot().await.unwrap().tasks.len(), 1);
+    reopened.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn update_center_preserves_cursor_dispositions_labels_downloads_and_backup() {
+    use crate::{
+        catalog::Release,
+        model::{ReleaseSummary, WatchEntry},
+        update_center::Ledger,
+    };
+    let fixture = Fixture::new(Mode::Range, 4000).await;
+    let root = tempfile::tempdir().unwrap();
+    let database = root.path().join("center.sqlite3");
+    let manager = Manager::start(&database, fixture.engine(), Arc::new(|_| {})).unwrap();
+    let summary = |id, tag: &str| ReleaseSummary {
+        id,
+        tag: tag.into(),
+        url: format!("https://github.com/test/repo/releases/tag/{tag}"),
+        published_at: Some(id),
+        atom: false,
+    };
+    let release = |id, tag: &str| Release {
+        id,
+        tag: tag.into(),
+        name: tag.into(),
+        prerelease: false,
+        url: format!("https://github.com/test/repo/releases/tag/{tag}"),
+        notes: "完整说明\n".repeat(200),
+        assets: vec![],
+        published_at: Some(id),
+        atom: false,
+    };
+    let initial = manager
+        .add_favorite("https://github.com/test/repo".into())
+        .await
+        .unwrap();
+    let mut favorite = initial.favorites[0].clone();
+    favorite.latest = Some(summary(1, "v1"));
+    let entry = WatchEntry {
+        acked_release_id: Some(1),
+        notified_release_id: Some(1),
+        ..Default::default()
+    };
+    manager
+        .update_watch_release(
+            favorite.clone(),
+            entry.clone(),
+            false,
+            Some(release(1, "v1")),
+        )
+        .await
+        .unwrap();
+    let baseline = manager.update_page(None, 10, None, false).await.unwrap();
+    assert!(baseline.events.is_empty());
+    manager
+        .project_labels(
+            "test/repo".into(),
+            "开发工具".into(),
+            vec!["Rust".into(), "Rust".into()],
+        )
+        .await
+        .unwrap();
+    favorite.latest = Some(summary(2, "v2"));
+    manager
+        .update_watch_release(
+            favorite.clone(),
+            entry.clone(),
+            true,
+            Some(release(2, "v2")),
+        )
+        .await
+        .unwrap();
+    let first = manager
+        .update_page(Some(baseline.next_cursor.clone()), 10, None, false)
+        .await
+        .unwrap();
+    let repeated = manager
+        .update_page(Some(baseline.next_cursor), 10, None, false)
+        .await
+        .unwrap();
+    assert_eq!(first.events[0].id, repeated.events[0].id);
+    assert!(first.events[0].notes.is_none());
+    let id = first.events[0].id;
+    assert_eq!(
+        manager.update_event(id).await.unwrap().notes,
+        Some("完整说明\n".repeat(200))
+    );
+    assert!(manager.update_event(id).await.unwrap().seen_at.is_none());
+    let state = manager.snapshot().await.unwrap();
+    assert_eq!(
+        state.watch_state.entry("test/repo").unwrap().group,
+        "开发工具"
+    );
+    assert_eq!(
+        state.watch_state.entry("test/repo").unwrap().tags,
+        vec!["Rust"]
+    );
+    assert!(state.watch_state.is_unread(&state.favorites[0]));
+    manager.update_action(id, "skip".into()).await.unwrap();
+    // 同一标签的 Atom/API 身份变化不能产生第二条事件或恢复提醒。
+    favorite.latest = Some(summary(200, "v2"));
+    manager
+        .update_watch_release(favorite, entry, true, Some(release(200, "v2")))
+        .await
+        .unwrap();
+    let state = manager.snapshot().await.unwrap();
+    assert!(!state.watch_state.is_unread(&state.favorites[0]));
+    assert_eq!(
+        manager
+            .update_page(None, 10, None, false)
+            .await
+            .unwrap()
+            .events
+            .len(),
+        1
+    );
+    assert!(manager.update_event(id).await.unwrap().skipped);
+    let created = manager
+        .create(SOURCE.replace("/v1/", "/v2/"), root.path().into())
+        .await
+        .unwrap();
+    let task_id = created.tasks[0].id.clone();
+    wait_for(&manager, |state| {
+        state.tasks[0].status == TaskStatus::Completed
+    })
+    .await;
+    assert_eq!(
+        manager.update_event(id).await.unwrap().downloaded_tasks,
+        vec![task_id]
+    );
+    let backup = root.path().join("backup.sqlite3");
+    manager.export_backup(backup.clone()).await.unwrap();
+    manager.shutdown().await.unwrap();
+    let backup = Store::open(&backup).unwrap();
+    let ledger: Ledger = backup.get_json("update_ledger").unwrap().unwrap();
+    assert_eq!(
+        ledger
+            .page(Some(&first.next_cursor), 10, None)
+            .unwrap()
+            .events
+            .len(),
+        0
+    );
+    assert!(ledger.event(id).unwrap().skipped);
+    drop(backup);
+    let reopened = Manager::start(&database, fixture.engine(), Arc::new(|_| {})).unwrap();
+    assert_eq!(reopened.update_event(id).await.unwrap().release.id, 200);
+    assert_eq!(
+        reopened
+            .snapshot()
+            .await
+            .unwrap()
+            .watch_state
+            .entry("test/repo")
+            .unwrap()
+            .group,
+        "开发工具"
+    );
+    reopened.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn software_and_watchlist_migration_require_preview_and_preserve_local_boundaries() {
+    use crate::{
+        model::{ReleaseSummary, WatchRule},
+        watchlist,
+    };
+    let fixture = Fixture::new(Mode::Range, 4000).await;
+    let root = tempfile::tempdir().unwrap();
+    let destination = root.path().join("imported");
+    std::fs::create_dir(&destination).unwrap();
+    let destination = dunce::canonicalize(destination).unwrap();
+    let database = root.path().join("software.sqlite3");
+    let manager = Manager::start(&database, fixture.engine(), Arc::new(|_| {})).unwrap();
+    manager
+        .add_favorite("https://github.com/test/repo".into())
+        .await
+        .unwrap();
+    manager
+        .watch_rule(
+            "test/repo".into(),
+            WatchRule {
+                download_directory: Some(root.path().into()),
+                asset_pattern: Some("*.bin".into()),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    let mut portable = manager.watchlist_export().await.unwrap();
+    let mut settings = manager.snapshot().await.unwrap().settings;
+    settings.watch_auto_download = true;
+    manager.settings(settings).await.unwrap();
+    assert!(!manager
+        .snapshot()
+        .await
+        .unwrap()
+        .watch_state
+        .entry("test/repo")
+        .unwrap()
+        .rule
+        .automatic(true));
+    let exported = serde_json::to_string(&portable).unwrap();
+    assert!(!exported.contains("downloadDirectory"));
+    assert!(!exported.contains(&root.path().to_string_lossy().to_string()));
+    let file = root.path().join("watchlist.json");
+    watchlist::write_file(&portable, &file).unwrap();
+    assert!(watchlist::write_file(&portable, &file).is_err());
+    assert_eq!(
+        watchlist::parse(&std::fs::read_to_string(&file).unwrap())
+            .unwrap()
+            .projects
+            .len(),
+        1
+    );
+    portable.projects[0].group = "迁移后的工具".into();
+    let input = serde_json::to_string(&portable).unwrap();
+    let preview = manager
+        .watchlist_preview(input.clone(), destination.clone(), "replace".into())
+        .await
+        .unwrap();
+    assert_eq!(preview.items[0].state, "conflict");
+    manager
+        .project_labels("test/repo".into(), "预览后修改".into(), vec![])
+        .await
+        .unwrap();
+    assert!(manager
+        .import_watchlist(
+            input.clone(),
+            destination.clone(),
+            "replace".into(),
+            preview.fingerprint
+        )
+        .await
+        .unwrap_err()
+        .message
+        .contains("重新预览"));
+    let preview = manager
+        .watchlist_preview(input.clone(), destination.clone(), "replace".into())
+        .await
+        .unwrap();
+    manager
+        .import_watchlist(
+            input.clone(),
+            destination.clone(),
+            "replace".into(),
+            preview.fingerprint,
+        )
+        .await
+        .unwrap();
+    let current = manager.snapshot().await.unwrap();
+    assert_eq!(
+        current
+            .watch_state
+            .entry("test/repo")
+            .unwrap()
+            .rule
+            .download_directory
+            .as_deref(),
+        Some(destination.as_path())
+    );
+    assert!(current.favorites[0].latest.is_none());
+    assert!(!current
+        .watch_state
+        .entry("test/repo")
+        .unwrap()
+        .rule
+        .automatic(true));
+    assert!(manager
+        .update_page(None, 10, None, false)
+        .await
+        .unwrap()
+        .events
+        .is_empty());
+    let duplicate = manager
+        .watchlist_preview(input, destination.clone(), "keep".into())
+        .await
+        .unwrap();
+    assert_eq!(duplicate.items[0].state, "duplicate");
+    assert_eq!(duplicate.items[0].action, "keep");
+    let mut favorite = current.favorites[0].clone();
+    favorite.latest = Some(ReleaseSummary {
+        id: 2,
+        tag: "v2".into(),
+        url: "https://github.com/test/repo/releases/tag/v2".into(),
+        published_at: None,
+        atom: false,
+    });
+    manager.update_favorite(favorite, false).await.unwrap();
+    manager
+        .create(SOURCE.into(), root.path().into())
+        .await
+        .unwrap();
+    wait_for(&manager, |state| {
+        state.tasks[0].status == TaskStatus::Completed
+    })
+    .await;
+    let software = manager.software("test/repo".into(), 1).await.unwrap();
+    assert_eq!(software.items[0].file_state, "present");
+    assert_eq!(software.items[0].differs_from_latest, Some(true));
+    let path = software.items[0].path.as_ref().unwrap();
+    std::fs::rename(path, root.path().join("moved.bin")).unwrap();
+    assert_eq!(
+        manager.software("".into(), 1).await.unwrap().items[0].file_state,
+        "missing"
+    );
+    std::fs::write(path, b"changed").unwrap();
+    assert_eq!(
+        manager.software("".into(), 1).await.unwrap().items[0].file_state,
+        "changed_size"
+    );
+    manager.shutdown().await.unwrap();
+    let reopened = Manager::start(&database, fixture.engine(), Arc::new(|_| {})).unwrap();
+    assert_eq!(
+        reopened
+            .snapshot()
+            .await
+            .unwrap()
+            .watch_state
+            .entry("test/repo")
+            .unwrap()
+            .group,
+        "迁移后的工具"
+    );
+    reopened.shutdown().await.unwrap();
+}

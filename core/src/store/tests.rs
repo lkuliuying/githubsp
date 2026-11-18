@@ -411,6 +411,14 @@ fn history_only_decodes_current_page_and_clamps_after_last_page_removal() {
         .unwrap();
     store.connection.execute_batch(&trigger).unwrap();
     assert_eq!(store.query_history("", None, 1, 0).unwrap().items.len(), 20);
+    // 界面可选每页条数；超出 5–100 拒绝。
+    let sized = store.query_history_sized("", None, 2, 10, 0).unwrap();
+    assert_eq!(
+        (sized.page, sized.page_size, sized.items.len()),
+        (2, 10, 10)
+    );
+    assert!(store.query_history_sized("", None, 1, 4, 0).is_err());
+    assert!(store.query_history_sized("", None, 1, 101, 0).is_err());
     assert!(store.query_history("", None, 3, 0).is_err());
     store.remove(&oldest).unwrap();
     let page = store.query_history("", None, 3, 0).unwrap();

@@ -11,6 +11,9 @@ use std::{
 };
 use tokio_util::sync::CancellationToken;
 
+/// 一个下载任务最多拆成的分段数，对应设置里「同时连接数」的上限。
+pub const MAX_PARTS: usize = 8;
+
 #[derive(Debug, Clone)]
 pub struct Workspace {
     pub path: PathBuf,
@@ -92,7 +95,7 @@ impl Workspace {
 
     pub fn clear_parts(&self) -> Result<()> {
         self.validate()?;
-        for index in 0..2 {
+        for index in 0..MAX_PARTS {
             let path = self.part(index)?;
             match fs::remove_file(path) {
                 Ok(()) => (),
@@ -128,7 +131,7 @@ impl Workspace {
     }
 
     pub fn verify_parts(&self, checkpoint: &Checkpoint, token: &CancellationToken) -> Result<bool> {
-        if checkpoint.parts.is_empty() || checkpoint.parts.len() > 2 {
+        if checkpoint.parts.is_empty() || checkpoint.parts.len() > MAX_PARTS {
             return Ok(false);
         }
         let mut next = 0;

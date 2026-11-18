@@ -6,9 +6,7 @@ import type { Bootstrap, Snapshot } from "./model";
 export type View =
   | "queue"
   | "new"
-  | "routes"
-  | "history"
-  | "favorites"
+  | "software"
   | "settings";
 type Message = { id: number; text: string; kind: "error" | "success" | "info" };
 interface State {

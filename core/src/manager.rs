@@ -279,7 +279,15 @@ enum Operation {
     AddFavorite(String),
     RemoveFavorite(String),
     UpdateFavorite(crate::model::Favorite, bool),
-    WatchUpdate(crate::model::Favorite, WatchEntry, bool),
+    WatchUpdate(
+        crate::model::Favorite,
+        Box<WatchEntry>,
+        bool,
+        Option<Box<crate::catalog::Release>>,
+    ),
+    UpdateAction(u64, String),
+    ProjectLabels(String, String, Vec<String>),
+    ImportWatchlist(String, PathBuf, String, String),
     AckWatch(Option<String>),
     WatchRule(String, WatchRule),
     CheckProgress(CheckProgress),
@@ -313,6 +321,11 @@ impl Manager {
         let (total_tasks, completed_tasks) = store.counts()?;
         let last_directory = store.last_directory()?;
         let settings = store.settings()?;
+        let ledger = store
+            .get_json::<crate::update_center::Ledger>("update_ledger")?
+            .unwrap_or_default();
+        ledger.validate()?;
+        store.set_json("update_ledger", &ledger)?;
         let favorites = store.favorites()?;
         let mut watch_state: WatchState = match store.get_json("watch_state") {
             Ok(value) => value.unwrap_or_default(),
@@ -338,7 +351,16 @@ impl Manager {
             store.set_json("watch_state", &watch_state)?;
         }
         engine.limiter.set(settings.limit_kib);
+        engine.connections.set(settings.connections);
         let mut diagnostics: Vec<RouteReport> = store.get_json("diagnostics")?.unwrap_or_default();
+        // 删除的镜像不再出现在线路列表里。
+        diagnostics.retain(|report| {
+            engine
+                .network
+                .routes
+                .iter()
+                .any(|route| route.id == report.id)
+        });
         for route in &engine.network.routes {
             if !diagnostics.iter().any(|r| r.id == route.id) {
                 diagnostics.push(RouteReport {
@@ -434,16 +456,38 @@ impl Manager {
             })
             .await
     }
+    pub async fn agent_task(&self, key: String) -> Result<Task> {
+        self.readers
+            .run(move |store, _| {
+                store
+                    .agent_task(&key)?
+                    .map(|record| record.task)
+                    .ok_or_else(|| DownloadError::new(ErrorKind::NotFound, "未找到此幂等请求"))
+            })
+            .await
+    }
     pub async fn history(
         &self,
         query: String,
         status: Option<TaskStatus>,
         page: u32,
     ) -> Result<crate::history::HistoryPage> {
+        self.history_sized(query, status, page, crate::history::PAGE_SIZE)
+            .await
+    }
+    pub async fn history_sized(
+        &self,
+        query: String,
+        status: Option<TaskStatus>,
+        page: u32,
+        page_size: usize,
+    ) -> Result<crate::history::HistoryPage> {
         crate::history::normalize_query(&query, page)?;
         let revision = self.snapshot().await?.history_revision;
         self.readers
-            .run(move |store, _| store.query_history(&query, status, page, revision))
+            .run(move |store, _| {
+                store.query_history_sized(&query, status, page, page_size, revision)
+            })
             .await
     }
     pub async fn export_backup(&self, target: PathBuf) -> Result<()> {
@@ -502,8 +546,133 @@ impl Manager {
         entry: WatchEntry,
         notify: bool,
     ) -> Result<Snapshot> {
-        self.request(Operation::WatchUpdate(favorite, entry, notify))
+        self.request(Operation::WatchUpdate(
+            favorite,
+            Box::new(entry),
+            notify,
+            None,
+        ))
+        .await
+    }
+    pub async fn update_watch_release(
+        &self,
+        favorite: Favorite,
+        entry: WatchEntry,
+        notify: bool,
+        release: Option<crate::catalog::Release>,
+    ) -> Result<Snapshot> {
+        self.request(Operation::WatchUpdate(
+            favorite,
+            Box::new(entry),
+            notify,
+            release.map(Box::new),
+        ))
+        .await
+    }
+    pub async fn update_page(
+        &self,
+        cursor: Option<String>,
+        limit: u32,
+        repository: Option<String>,
+        recent: bool,
+    ) -> Result<crate::update_center::UpdatePage> {
+        self.readers
+            .run(move |store, _| {
+                let ledger = store
+                    .get_json::<crate::update_center::Ledger>("update_ledger")?
+                    .unwrap_or_default();
+                if recent {
+                    ledger.recent(cursor.as_deref(), limit, repository.as_deref())
+                } else {
+                    ledger.page(cursor.as_deref(), limit, repository.as_deref())
+                }
+            })
             .await
+    }
+    pub async fn update_event(&self, id: u64) -> Result<crate::update_center::UpdateEvent> {
+        self.readers
+            .run(move |store, _| {
+                Ok(store
+                    .get_json::<crate::update_center::Ledger>("update_ledger")?
+                    .unwrap_or_default()
+                    .event(id)?
+                    .clone())
+            })
+            .await
+    }
+    pub async fn update_action(&self, id: u64, action: String) -> Result<Snapshot> {
+        self.request(Operation::UpdateAction(id, action)).await
+    }
+    pub async fn project_labels(
+        &self,
+        repository: String,
+        group: String,
+        tags: Vec<String>,
+    ) -> Result<Snapshot> {
+        self.request(Operation::ProjectLabels(repository, group, tags))
+            .await
+    }
+    pub async fn software(
+        &self,
+        query: String,
+        page: u32,
+    ) -> Result<crate::software::SoftwarePage> {
+        let favorites = self.snapshot().await?.favorites;
+        Ok(crate::software::page(
+            self.history(query, Some(TaskStatus::Completed), page)
+                .await?,
+            &favorites,
+        ))
+    }
+    /// 按项目汇总本地已下载文件；文件状态只检查每个项目最近一次下载的文件。
+    pub async fn software_projects(&self) -> Result<Vec<crate::software::LocalSoftware>> {
+        self.readers
+            .run(|store, _| {
+                Ok(crate::software::projects(
+                    store.completed_tasks(crate::software::PROJECT_SCAN_LIMIT)?,
+                ))
+            })
+            .await
+    }
+    pub async fn watchlist_export(&self) -> Result<crate::watchlist::Manifest> {
+        let snapshot = self.snapshot().await?;
+        Ok(crate::watchlist::export(
+            &snapshot.favorites,
+            &snapshot.watch_state,
+            snapshot.settings.watch_auto_download,
+        ))
+    }
+    pub async fn watchlist_preview(
+        &self,
+        input: String,
+        directory: PathBuf,
+        policy: String,
+    ) -> Result<crate::watchlist::Preview> {
+        let manifest = crate::watchlist::parse(&input)?;
+        let snapshot = self.snapshot().await?;
+        crate::watchlist::preview(
+            &manifest,
+            &directory,
+            &policy,
+            &snapshot.favorites,
+            &snapshot.watch_state,
+            snapshot.settings.watch_auto_download,
+        )
+    }
+    pub async fn import_watchlist(
+        &self,
+        input: String,
+        directory: PathBuf,
+        policy: String,
+        fingerprint: String,
+    ) -> Result<Snapshot> {
+        self.request(Operation::ImportWatchlist(
+            input,
+            directory,
+            policy,
+            fingerprint,
+        ))
+        .await
     }
     pub async fn ack_watch(&self, repository: Option<String>) -> Result<Snapshot> {
         self.request(Operation::AckWatch(repository)).await
@@ -994,8 +1163,15 @@ impl Actor {
                 })
             }
             Operation::UpdateFavorite(favorite, notify) => self.update_favorite(favorite, notify),
-            Operation::WatchUpdate(favorite, entry, notify) => {
-                self.update_watch(favorite, entry, notify)
+            Operation::WatchUpdate(favorite, entry, notify, release) => {
+                self.update_watch(favorite, *entry, notify, release.as_deref())
+            }
+            Operation::UpdateAction(id, action) => self.update_disposition(id, &action),
+            Operation::ProjectLabels(repository, group, tags) => {
+                self.project_labels(&repository, group, tags)
+            }
+            Operation::ImportWatchlist(input, directory, policy, fingerprint) => {
+                self.import_watchlist(&input, &directory, &policy, &fingerprint)
             }
             Operation::AckWatch(repository) => self.ack_watch(repository),
             Operation::WatchRule(repository, rule) => self.set_watch_rule(&repository, rule),
@@ -1019,6 +1195,36 @@ impl Actor {
     fn create(&mut self, url: String, directory: PathBuf, options: CreateOptions) -> Result<()> {
         let source = parse_release_url(&url)?;
         self.validate_route(options.preferred_route.as_deref())?;
+        let fingerprint = serde_json::to_string(&(
+            source.url.as_str(),
+            &directory,
+            options.asset_id,
+            options.size,
+            &options.official_sha256,
+            &options.preferred_route,
+        ))?;
+        if let Some(key) = &options.request_key {
+            if key.is_empty()
+                || key.len() > 128
+                || !key
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || "_-.:".contains(c))
+            {
+                return Err(DownloadError::new(
+                    ErrorKind::InvalidInput,
+                    "请求键需为 1–128 位字母、数字或 _-.:",
+                ));
+            }
+            if let Some(old) = self.store.agent_task(key)? {
+                if old.task.details.agent_request_fingerprint.as_deref() == Some(&fingerprint) {
+                    return Ok(());
+                }
+                return Err(DownloadError::new(
+                    ErrorKind::InvalidInput,
+                    "相同请求键已用于不同下载参数",
+                ));
+            }
+        }
         if self.records.iter().any(|record| {
             parse_release_url(&record.task.url).is_ok_and(|old| old.url == source.url)
                 && record.task.directory == directory
@@ -1037,6 +1243,8 @@ impl Actor {
         let record = StoredTask {
             task: Task {
                 details: TaskDetails {
+                    agent_request_key: options.request_key,
+                    agent_request_fingerprint: Some(fingerprint),
                     repository: Some(format!("{}/{}", source.owner, source.repo)),
                     tag: Some(source.tag.clone()),
                     asset_id: options.asset_id,
@@ -1096,7 +1304,7 @@ impl Actor {
         }) {
             return Err(DownloadError::new(
                 ErrorKind::InvalidInput,
-                "下载线路不在内置列表中",
+                "下载线路不在当前线路列表中",
             ));
         }
         Ok(())
@@ -1250,7 +1458,7 @@ impl Actor {
             .entry(&favorite.repository)
             .cloned()
             .unwrap_or_default();
-        self.update_watch(favorite, entry, notify)
+        self.update_watch(favorite, entry, notify, None)
     }
 
     fn update_watch(
@@ -1258,35 +1466,220 @@ impl Actor {
         favorite: crate::model::Favorite,
         mut entry: WatchEntry,
         notify: bool,
+        full: Option<&crate::catalog::Release>,
     ) -> Result<()> {
         let Some(index) = self.favorites.iter().position(|f| f.id == favorite.id) else {
             return Ok(());
         };
-        let latest = favorite.latest.as_ref();
-        if notify && self.settings.watch_notifications {
-            if let Some(latest) =
-                latest.filter(|latest| entry.notified_release_id != Some(latest.id))
+        if let Some(current) = self.watch_state.entry(&favorite.repository) {
+            entry.group = current.group.clone();
+            entry.tags = current.tags.clone();
+            entry.skipped_release_ids = current.skipped_release_ids.clone();
+            entry.rule = current.rule.clone();
+            entry.acked_release_id = current.acked_release_id.or(entry.acked_release_id);
+            entry.notified_release_id = current.notified_release_id.or(entry.notified_release_id);
+            if let Some((old, new)) = self.favorites[index]
+                .latest
+                .as_ref()
+                .zip(favorite.latest.as_ref())
+                .filter(|(old, new)| old.tag == new.tag)
             {
-                entry.notified_release_id = Some(latest.id);
-                self.add_notice(
-                    NoticeKind::FavoriteUpdated,
-                    None,
-                    format!("项目有新正式版：{} · {}", favorite.repository, latest.tag),
-                );
+                if entry.acked_release_id == Some(old.id) {
+                    entry.acked_release_id = Some(new.id);
+                }
+                if entry.notified_release_id == Some(old.id) {
+                    entry.notified_release_id = Some(new.id);
+                }
+                if entry.skipped_release_ids.contains(&old.id)
+                    && !entry.skipped_release_ids.contains(&new.id)
+                {
+                    entry.skipped_release_ids.push(new.id);
+                }
             }
         }
-        self.store.save_favorite(&favorite)?;
-        self.watch_state
+        let latest = favorite.latest.as_ref();
+        let mut ledger = self
+            .store
+            .get_json::<crate::update_center::Ledger>("update_ledger")?
+            .unwrap_or_default();
+        if let Some(latest) = latest {
+            if ledger.append(
+                &favorite.repository,
+                self.favorites[index].latest.as_ref(),
+                latest,
+                full,
+            )? {
+                for id in self
+                    .store
+                    .matching_completed(&favorite.repository, &latest.tag)?
+                {
+                    ledger.downloaded(&favorite.repository, &latest.tag, &id)?;
+                }
+            }
+            if let Some(event) = ledger.events.iter().find(|event| {
+                event.repository.eq_ignore_ascii_case(&favorite.repository)
+                    && event.release.tag == latest.tag
+            }) {
+                if event.seen_at.is_some() {
+                    entry.acked_release_id = Some(latest.id);
+                }
+                if event.skipped && !entry.skipped_release_ids.contains(&latest.id) {
+                    entry.skipped_release_ids.push(latest.id);
+                }
+            }
+        }
+        let mut notice = None;
+        if notify && self.settings.watch_notifications {
+            if let Some(latest) = latest.filter(|latest| {
+                entry.notified_release_id != Some(latest.id)
+                    && entry.acked_release_id != Some(latest.id)
+                    && !entry.skipped_release_ids.contains(&latest.id)
+            }) {
+                entry.notified_release_id = Some(latest.id);
+                notice = Some(format!(
+                    "项目有新版本：{} · {}",
+                    favorite.repository, latest.tag
+                ));
+            }
+        }
+        let mut state = self.watch_state.clone();
+        state
             .repositories
             .insert(favorite.repository.to_ascii_lowercase(), entry);
-        self.store.set_json("watch_state", &self.watch_state)?;
+        self.store.save_center(Some(&favorite), &state, &ledger)?;
+        self.watch_state = state;
         self.favorites[index] = favorite;
+        if let Some(message) = notice {
+            self.add_notice(NoticeKind::FavoriteUpdated, None, message);
+        }
+        self.publish();
+        Ok(())
+    }
+
+    fn update_disposition(&mut self, id: u64, action: &str) -> Result<()> {
+        let mut ledger = self
+            .store
+            .get_json::<crate::update_center::Ledger>("update_ledger")?
+            .unwrap_or_default();
+        ledger.action(id, action)?;
+        let event = ledger.event(id)?;
+        let mut state = self.watch_state.clone();
+        let entry = state.entry_mut(&event.repository);
+        if action == "skip" && !entry.skipped_release_ids.contains(&event.release.id) {
+            entry.skipped_release_ids.push(event.release.id);
+        }
+        if action == "unskip" {
+            entry
+                .skipped_release_ids
+                .retain(|release| *release != event.release.id);
+        }
+        if action != "unskip"
+            && self.favorites.iter().any(|favorite| {
+                favorite.repository.eq_ignore_ascii_case(&event.repository)
+                    && favorite
+                        .latest
+                        .as_ref()
+                        .is_some_and(|latest| latest.id == event.release.id)
+            })
+        {
+            entry.acked_release_id = Some(event.release.id);
+        }
+        self.store.save_center(None, &state, &ledger)?;
+        self.watch_state = state;
+        self.publish();
+        Ok(())
+    }
+
+    fn project_labels(&mut self, repository: &str, group: String, tags: Vec<String>) -> Result<()> {
+        let (group, tags) = crate::watchlist::labels(group, tags)?;
+        if !self
+            .favorites
+            .iter()
+            .any(|favorite| favorite.repository.eq_ignore_ascii_case(repository))
+        {
+            return Err(DownloadError::new(ErrorKind::NotFound, "收藏项目不存在"));
+        }
+        let mut state = self.watch_state.clone();
+        let entry = state.entry_mut(repository);
+        entry.group = group;
+        entry.tags = tags;
+        self.store.set_json("watch_state", &state)?;
+        self.watch_state = state;
+        self.publish();
+        Ok(())
+    }
+
+    fn import_watchlist(
+        &mut self,
+        input: &str,
+        directory: &Path,
+        policy: &str,
+        fingerprint: &str,
+    ) -> Result<()> {
+        let manifest = crate::watchlist::parse(input)?;
+        let preview = crate::watchlist::preview(
+            &manifest,
+            directory,
+            policy,
+            &self.favorites,
+            &self.watch_state,
+            self.settings.watch_auto_download,
+        )?;
+        if preview.fingerprint != fingerprint {
+            return Err(DownloadError::new(
+                ErrorKind::InvalidInput,
+                "关注清单或项目规则已变化，请重新预览后导入",
+            ));
+        }
+        let mut favorites = self.favorites.clone();
+        let mut state = self.watch_state.clone();
+        for project in manifest.projects {
+            let existing = favorites.iter().any(|favorite| {
+                favorite
+                    .repository
+                    .eq_ignore_ascii_case(&project.repository)
+            });
+            if existing && policy == "keep" {
+                continue;
+            }
+            if !existing {
+                favorites.push(Favorite {
+                    id: uuid::Uuid::new_v4().to_string(),
+                    repository: project.repository.clone(),
+                    latest: None,
+                    seen: Vec::new(),
+                    last_checked: None,
+                    last_success: None,
+                    next_check: None,
+                    error: None,
+                });
+            }
+            let entry = state.entry_mut(&project.repository);
+            entry.group = project.group;
+            entry.tags = project.tags;
+            entry.rule = WatchRule {
+                auto_download_override: Some(project.rule.auto_download),
+                download_directory: Some(preview.directory.clone()),
+                include_prerelease: project.rule.include_prerelease,
+                auto_download: project.rule.auto_download,
+                asset_pattern: project.rule.asset_pattern,
+                preference: project.rule.preference,
+            };
+        }
+        self.store.save_watchlist(&favorites, &state)?;
+        self.favorites = favorites;
+        self.watch_state = state;
         self.publish();
         Ok(())
     }
 
     fn ack_watch(&mut self, repository: Option<String>) -> Result<()> {
         let mut changed = false;
+        let mut state = self.watch_state.clone();
+        let mut ledger = self
+            .store
+            .get_json::<crate::update_center::Ledger>("update_ledger")?
+            .unwrap_or_default();
         for favorite in &self.favorites {
             if repository
                 .as_ref()
@@ -1297,7 +1690,7 @@ impl Actor {
             let Some(latest) = favorite.latest.as_ref() else {
                 continue;
             };
-            let entry = self.watch_state.entry_mut(&favorite.repository);
+            let entry = state.entry_mut(&favorite.repository);
             if entry.acked_release_id != Some(latest.id) {
                 entry.acked_release_id = Some(latest.id);
                 changed = true;
@@ -1307,23 +1700,36 @@ impl Actor {
                 changed = true;
             }
         }
+        for event in ledger.events.iter_mut().filter(|event| {
+            repository
+                .as_ref()
+                .is_none_or(|repo| repo.eq_ignore_ascii_case(&event.repository))
+        }) {
+            if event.seen_at.is_none() {
+                event.seen_at = Some(now_ms());
+                changed = true;
+            }
+        }
         if changed {
-            self.store.set_json("watch_state", &self.watch_state)?;
+            self.store.save_center(None, &state, &ledger)?;
+            self.watch_state = state;
             self.publish();
         }
         Ok(())
     }
 
-    fn set_watch_rule(&mut self, repository: &str, rule: WatchRule) -> Result<()> {
-        if rule
-            .asset_pattern
-            .as_ref()
-            .is_some_and(|pattern| pattern.len() > 200)
-        {
-            return Err(DownloadError::new(
-                ErrorKind::InvalidInput,
-                "附件匹配规则过长，请控制在 200 个字符内",
-            ));
+    fn set_watch_rule(&mut self, repository: &str, mut rule: WatchRule) -> Result<()> {
+        rule.auto_download_override = Some(rule.auto_download);
+        crate::watchlist::validate_rule(&crate::watchlist::PortableRule::from(&rule))?;
+        if let Some(directory) = &rule.download_directory {
+            if !directory.is_absolute() || !directory.is_dir() {
+                return Err(DownloadError::new(
+                    ErrorKind::InvalidInput,
+                    "项目下载目录必须是已存在的绝对目录",
+                ));
+            }
+            rule.download_directory =
+                Some(crate::preflight::inspect_directory(directory)?.directory);
         }
         if !self
             .favorites
@@ -1332,16 +1738,26 @@ impl Actor {
         {
             return Err(DownloadError::new(ErrorKind::NotFound, "收藏项目不存在"));
         }
-        self.watch_state.entry_mut(repository).rule = rule;
-        self.store.set_json("watch_state", &self.watch_state)?;
+        let mut state = self.watch_state.clone();
+        state.entry_mut(repository).rule = rule;
+        self.store.set_json("watch_state", &state)?;
+        self.watch_state = state;
         self.publish();
         Ok(())
     }
     fn update_settings(&mut self, settings: Settings) -> Result<()> {
+        settings.network.validate()?;
+        settings.agent.validate()?;
         if settings.limit_kib > 10_000_000 {
             return Err(DownloadError::new(
                 ErrorKind::InvalidInput,
                 "下载限速超出允许范围，请输入 0（不限速）或 0.001024 至 10240 MB/s 之间的数值",
+            ));
+        }
+        if !(1..=crate::files::MAX_PARTS as u8).contains(&settings.connections) {
+            return Err(DownloadError::new(
+                ErrorKind::InvalidInput,
+                "同时连接数只支持 1 至 8",
             ));
         }
         if !Settings::CHECK_INTERVALS_MS.contains(&settings.watch_interval_ms) {
@@ -1365,6 +1781,7 @@ impl Actor {
         let interval_changed = settings.watch_interval_ms != self.settings.watch_interval_ms;
         self.store.set_json("preferences", &settings)?;
         self.engine.limiter.set(settings.limit_kib);
+        self.engine.connections.set(settings.connections);
         if settings.limit_kib != 0 {
             self.cancel_suggestion("下载限速已启用，本次换线未执行");
             for record in &mut self.records {
@@ -1873,6 +2290,7 @@ impl Actor {
                 record.task.downloaded = file.size;
                 record.task.total = Some(file.size);
                 record.task.final_path = Some(file.path);
+                record.task.details.sha256 = Some(file.sha256);
                 record.task.verification = if file.verified {
                     Verification::Verified
                 } else {

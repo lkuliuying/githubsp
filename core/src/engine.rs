@@ -62,6 +62,56 @@ impl Reporter {
 pub struct Engine {
     pub(crate) network: Network,
     pub(crate) limiter: Arc<crate::limiter::RateLimiter>,
+    pub(crate) connections: Arc<Connections>,
+}
+
+/// 默认同时连接数。
+pub const DEFAULT_CONNECTIONS: u8 = 4;
+/// 每个分段至少 1 MiB；文件达到 2 MiB 才分段。
+const MIN_SEGMENT: u64 = 1024 * 1024;
+
+/// 新任务使用的同时连接数，设置保存后立即对之后开始的下载生效。
+pub struct Connections(std::sync::atomic::AtomicUsize);
+impl Default for Connections {
+    fn default() -> Self {
+        Self(std::sync::atomic::AtomicUsize::new(
+            DEFAULT_CONNECTIONS as usize,
+        ))
+    }
+}
+impl Connections {
+    pub fn set(&self, count: u8) {
+        self.0.store(
+            (count as usize).clamp(1, crate::files::MAX_PARTS),
+            std::sync::atomic::Ordering::Relaxed,
+        );
+    }
+    pub fn get(&self) -> usize {
+        self.0.load(std::sync::atomic::Ordering::Relaxed)
+    }
+}
+
+/// 按文件大小和连接数切分字节范围；不支持分段或大小未知时只用一个连接。
+pub(crate) fn plan_parts(
+    total: Option<u64>,
+    range_supported: bool,
+    connections: usize,
+) -> Vec<(u64, Option<u64>)> {
+    match total {
+        Some(total) if range_supported && total >= 2 * MIN_SEGMENT => {
+            let count = (connections.clamp(1, crate::files::MAX_PARTS) as u64)
+                .min(total / MIN_SEGMENT)
+                .max(1);
+            let size = total.div_ceil(count);
+            (0..count)
+                .map(|index| {
+                    let start = index * size;
+                    (start, Some(((index + 1) * size).min(total) - 1))
+                })
+                .collect()
+        }
+        _ => vec![(0, total.and_then(|total| total.checked_sub(1)))],
+    }
 }
 
 #[derive(Default)]
@@ -103,9 +153,14 @@ impl Engine {
     }
 
     pub fn production() -> Result<Self> {
+        Self::production_with(&Default::default())
+    }
+
+    pub fn production_with(settings: &crate::network_settings::NetworkSettings) -> Result<Self> {
         Ok(Self {
-            network: Network::production()?,
+            network: Network::production_with(settings)?,
             limiter: Arc::new(crate::limiter::RateLimiter::default()),
+            connections: Arc::default(),
         })
     }
 
@@ -266,10 +321,10 @@ impl Engine {
                     {
                         checkpoint
                     } else {
-                        fresh_checkpoint(&probe, expected.clone())
+                        fresh_checkpoint(&probe, expected.clone(), self.connections.get())
                     }
                 }
-                _ => fresh_checkpoint(&probe, expected.clone()),
+                _ => fresh_checkpoint(&probe, expected.clone(), self.connections.get()),
             };
             if let Some(expected) = &expected {
                 checkpoint.expected_sha256 = Some(expected.clone());
@@ -416,7 +471,8 @@ impl Engine {
                         let current = shared.lock().await.clone();
                         if !can_resume(&current, &probe, expected.as_deref()) {
                             workspace.clear_parts()?;
-                            *shared.lock().await = fresh_checkpoint(&probe, expected.clone());
+                            *shared.lock().await =
+                                fresh_checkpoint(&probe, expected.clone(), self.connections.get());
                             reporter
                                 .emit(EngineUpdate::Checkpoint(shared.lock().await.clone()))
                                 .await?;
@@ -464,33 +520,21 @@ pub fn can_resume(checkpoint: &Checkpoint, probe: &Probe, expected: Option<&str>
     checkpoint.etag.is_some() && checkpoint.etag == probe.etag
 }
 
-fn fresh_checkpoint(probe: &Probe, expected_sha256: Option<String>) -> Checkpoint {
+fn fresh_checkpoint(
+    probe: &Probe,
+    expected_sha256: Option<String>,
+    connections: usize,
+) -> Checkpoint {
     let empty_sha = format!("{:x}", Sha256::digest([]));
-    let parts =
-        if probe.range_supported && probe.total.is_some_and(|total| total >= 16 * 1024 * 1024) {
-            let total = probe.total.unwrap_or_default();
-            vec![
-                Part {
-                    start: 0,
-                    end: Some(total / 2 - 1),
-                    downloaded: 0,
-                    sha256: empty_sha.clone(),
-                },
-                Part {
-                    start: total / 2,
-                    end: Some(total - 1),
-                    downloaded: 0,
-                    sha256: empty_sha,
-                },
-            ]
-        } else {
-            vec![Part {
-                start: 0,
-                end: probe.total.and_then(|total| total.checked_sub(1)),
-                downloaded: 0,
-                sha256: empty_sha,
-            }]
-        };
+    let parts = plan_parts(probe.total, probe.range_supported, connections)
+        .into_iter()
+        .map(|(start, end)| Part {
+            start,
+            end,
+            downloaded: 0,
+            sha256: empty_sha.clone(),
+        })
+        .collect();
     Checkpoint {
         route_id: probe.route.id.clone(),
         total: probe.total,
@@ -638,6 +682,8 @@ impl Transfer {
             }
         }
         let html_type = network::is_html_type(&response);
+        // 分段越多，每段保存恢复点的间隔越长，避免频繁写盘。
+        let commit_every = Duration::from_millis(250 * checkpoint.parts.len().max(2) as u64);
         let mut first = true;
         let mut announced_data = false;
         let mut last_commit = Instant::now();
@@ -679,7 +725,7 @@ impl Transfer {
             }
             hasher.update(&chunk);
             part.downloaded += chunk.len() as u64;
-            if last_commit.elapsed() >= Duration::from_millis(500) {
+            if last_commit.elapsed() >= commit_every {
                 self.commit(index, part.clone(), &hasher, &mut file).await?;
                 last_commit = Instant::now();
             }

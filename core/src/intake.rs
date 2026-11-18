@@ -6,8 +6,12 @@ use crate::{
     preflight::{self, Preflight},
     source::parse_release_url,
 };
+use futures_util::{stream, StreamExt};
 use serde::Serialize;
-use std::{collections::HashSet, path::Path};
+use std::{
+    collections::{HashMap, HashSet},
+    path::Path,
+};
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -44,10 +48,12 @@ fn validate_count(urls: &[String]) -> Result<()> {
     Ok(())
 }
 
+/// `hints` 是界面已经知道的附件大小（例如版本列表），键为附件下载地址。
 pub async fn preview(
     manager: &Manager,
     catalog: &Catalog,
     urls: Vec<String>,
+    hints: &HashMap<String, u64>,
     directory: &Path,
 ) -> Result<BatchPreview> {
     validate_count(&urls)?;
@@ -55,10 +61,16 @@ pub async fn preview(
         .await?
         .directory;
     let snapshot = manager.snapshot().await?;
+    let hints: HashMap<String, u64> = hints
+        .iter()
+        .filter_map(|(url, size)| {
+            parse_release_url(url)
+                .ok()
+                .map(|source| (source.url.to_string(), *size))
+        })
+        .collect();
     let mut seen = HashSet::new();
     let mut items = Vec::new();
-    let mut known_size = 0_u64;
-    let mut unknown_count = 0;
     for input in urls {
         let mut item = BatchItem {
             input: input.clone(),
@@ -88,7 +100,7 @@ pub async fn preview(
                     Some(filename) => Some(filename),
                     None => Some(parse_release_url(&url)?.filename),
                 };
-                item.size = asset.map(|a| a.size);
+                item.size = asset.map(|a| a.size).or_else(|| hints.get(&url).copied());
                 let existing = snapshot.tasks.iter().find(|t| {
                     parse_release_url(&t.url).is_ok_and(|s| s.url.as_str() == url)
                         && t.directory == directory
@@ -100,17 +112,46 @@ pub async fn preview(
                     item.task_id = existing.map(|t| t.id.clone());
                 } else {
                     item.status = "valid".into();
-                    if let Some(size) = item.size {
-                        known_size = known_size.saturating_add(size);
-                    } else {
-                        unknown_count += 1;
-                    }
                 }
                 item.url = Some(url);
             }
             Err(error) => item.message = Some(error.message),
         }
         items.push(item);
+    }
+    // 仍不知道大小的有效附件并行查询一次，单个最多等待 5 秒；查不到时留到下载时确定。
+    let pending: Vec<_> = items
+        .iter()
+        .enumerate()
+        .filter(|(_, item)| item.status == "valid" && item.size.is_none())
+        .filter_map(|(index, item)| {
+            parse_release_url(item.url.as_deref()?)
+                .ok()
+                .map(|source| (index, source))
+        })
+        .collect();
+    let sizes: Vec<_> = stream::iter(pending)
+        .map(|(index, source)| async move { (index, catalog.asset_size(&source).await) })
+        .buffer_unordered(8)
+        .collect()
+        .await;
+    for (index, size) in sizes {
+        match size {
+            crate::catalog::AssetSize::Known(size) => items[index].size = Some(size),
+            crate::catalog::AssetSize::Missing => {
+                items[index].status = "invalid".into();
+                items[index].message = Some("GitHub 上找不到这个附件，请检查链接是否正确".into());
+            }
+            crate::catalog::AssetSize::Unknown => {}
+        }
+    }
+    let mut known_size = 0_u64;
+    let mut unknown_count = 0;
+    for item in items.iter().filter(|item| item.status == "valid") {
+        match item.size {
+            Some(size) => known_size = known_size.saturating_add(size),
+            None => unknown_count += 1,
+        }
     }
     let mut preflight = preflight::check_async(
         directory.clone(),
@@ -165,6 +206,7 @@ pub async fn create_batch(
                 size: asset.as_ref().map(|a| a.size),
                 official_sha256: asset.and_then(|a| a.sha256),
                 preferred_route: route.clone(),
+                ..Default::default()
             };
             let snapshot = manager
                 .create_with(url.clone(), directory.to_owned(), options)

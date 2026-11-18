@@ -374,6 +374,7 @@ pub fn bind(window: &MainWindow, api: &Arc<Service>, runtime: &tokio::runtime::H
                 let pattern = ui.get_rule_pattern().trim().to_string();
                 (!pattern.is_empty()).then_some(pattern)
             },
+            ..Default::default()
         };
         let service = api6.clone();
         bridge::run(

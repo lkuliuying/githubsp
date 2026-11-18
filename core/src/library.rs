@@ -1,3 +1,5 @@
+#[cfg(test)]
+use crate::selection::matches_pattern;
 use crate::{
     catalog::{Asset, Catalog, Release},
     error::{DownloadError, ErrorKind, Result},
@@ -33,6 +35,7 @@ pub struct Library {
 }
 
 struct Checked {
+    release: Option<Release>,
     favorite: Favorite,
     entry: WatchEntry,
     notify: bool,
@@ -43,12 +46,14 @@ struct Checked {
 struct Selection {
     mode: u8,
     pattern: Option<String>,
+    preference: Option<crate::selection::AssetPreference>,
 }
 
 impl Selection {
     fn new(settings: &Settings, rule: &WatchRule) -> Self {
         Self {
             mode: settings.watch_asset_mode,
+            preference: rule.preference.clone(),
             pattern: rule
                 .asset_pattern
                 .clone()
@@ -69,86 +74,27 @@ impl Selection {
         selection
     }
 
-    fn select(&self, release: &Release) -> Vec<Asset> {
+    fn select(&self, release: &Release) -> Result<Vec<Asset>> {
         if release.atom || self.mode == 2 {
-            return Vec::new();
+            return Ok(Vec::new());
         }
         let available = release
             .assets
             .iter()
             .filter(|asset| asset.unavailable.is_none());
         if self.mode == 1 {
-            return available.take(20).cloned().collect();
+            return Ok(available.take(20).cloned().collect());
         }
-        if let Some(pattern) = self
-            .pattern
-            .as_deref()
-            .filter(|pattern| !pattern.trim().is_empty())
-        {
-            let tag = release.tag.as_str();
-            let trimmed = tag.trim_start_matches(['v', 'V']);
-            let mut patterns = vec![pattern.replace("{version}", tag)];
-            if trimmed != tag {
-                patterns.push(pattern.replace("{version}", trimmed));
-            }
-            let matched: Vec<_> = available
-                .filter(|asset| {
-                    patterns
-                        .iter()
-                        .any(|pattern| matches_pattern(pattern, &asset.name))
-                })
-                .cloned()
-                .collect();
-            // 规划约定：多命中时不猜测，交由用户手动选择。
-            return if matched.len() == 1 {
-                matched
-            } else {
-                Vec::new()
-            };
-        }
-        let mut installers: Vec<_> = available
-            .filter(|asset| is_installer(&asset.name))
+        let result = crate::selection::recommend(
+            release,
+            self.preference.as_ref(),
+            self.pattern.as_deref(),
+        )?;
+        Ok(available
+            .filter(|asset| result.selected_urls.contains(&asset.url))
             .cloned()
-            .collect();
-        installers.sort_by_key(|asset| {
-            let name = asset.name.to_ascii_lowercase();
-            let mut score = if name.contains("setup") || name.contains("installer") {
-                4
-            } else if name.contains("win") || name.contains("x64") {
-                2
-            } else {
-                0
-            };
-            if name.contains("macos")
-                || name.contains("darwin")
-                || name.contains(".dmg")
-                || name.contains("linux")
-                || name.contains("appimage")
-                || name.contains(".deb")
-                || name.contains(".rpm")
-            {
-                score -= 3;
-            }
-            (score, asset.size)
-        });
-        installers.pop().into_iter().collect()
+            .collect())
     }
-}
-
-fn is_installer(name: &str) -> bool {
-    let name = name.to_ascii_lowercase();
-    [
-        ".exe",
-        ".msi",
-        ".msix",
-        ".dmg",
-        ".pkg",
-        ".appimage",
-        ".deb",
-        ".rpm",
-    ]
-    .iter()
-    .any(|extension| name.ends_with(extension))
 }
 
 impl Library {
@@ -285,17 +231,18 @@ impl Library {
             ));
         }
         let selection = Selection::manual(&snapshot.settings, &entry.rule);
-        let assets = selection.select(&release);
+        let assets = selection.select(&release)?;
         if assets.is_empty() {
             return Err(DownloadError::new(
                 ErrorKind::NotFound,
                 "未找到匹配当前下载规则的附件，请到版本页手动选择",
             ));
         }
-        let directory = snapshot
-            .last_directory
-            .as_deref()
-            .map(PathBuf::from)
+        let directory = entry
+            .rule
+            .download_directory
+            .clone()
+            .or_else(|| snapshot.last_directory.as_deref().map(PathBuf::from))
             .filter(|path| path.is_dir())
             .ok_or_else(|| DownloadError::new(ErrorKind::InvalidInput, "请先设置下载目录"))?;
         let mut last = None;
@@ -305,6 +252,7 @@ impl Library {
                 size: Some(asset.size),
                 official_sha256: asset.sha256.clone(),
                 preferred_route: None,
+                ..Default::default()
             };
             last = Some(
                 self.manager
@@ -417,33 +365,75 @@ impl Library {
                     Ok(checked) => {
                         let repository = checked.favorite.repository.clone();
                         let entry = checked.entry.clone();
-                        let assets = checked.assets.clone();
+                        let had_assets = !checked.assets.is_empty();
+                        let full = checked.release.clone();
                         let notify = checked.notify;
                         let favorite = checked.favorite.clone();
-                        self.manager
-                            .update_watch(favorite.clone(), entry, notify)
+                        let fresh = self
+                            .manager
+                            .update_watch_release(favorite.clone(), entry, notify, checked.release)
                             .await?;
+                        let mut entry = fresh
+                            .watch_state
+                            .entry(&repository)
+                            .cloned()
+                            .unwrap_or_default();
+                        let assets = if had_assets
+                            && entry.rule.automatic(fresh.settings.watch_auto_download)
+                            && !favorite.latest.as_ref().is_some_and(|latest| {
+                                entry.skipped_release_ids.contains(&latest.id)
+                            }) {
+                            full.as_ref()
+                                .map(|release| {
+                                    Selection::new(&fresh.settings, &entry.rule).select(release)
+                                })
+                                .transpose()?
+                                .unwrap_or_default()
+                        } else {
+                            Vec::new()
+                        };
+                        let key = assets
+                            .iter()
+                            .map(|asset| asset.id.to_string())
+                            .collect::<Vec<_>>()
+                            .join(",");
+                        let directory = entry
+                            .rule
+                            .download_directory
+                            .clone()
+                            .or_else(|| fresh.last_directory.as_deref().map(PathBuf::from))
+                            .filter(|path| path.is_dir());
+                        let mut failure = None;
+                        if !assets.is_empty() && directory.is_none() {
+                            failure = Some("自动下载未入队：请为项目选择有效的下载目录".to_owned());
+                        }
                         for asset in assets {
-                            if let Some(directory) = snapshot
-                                .last_directory
-                                .as_deref()
-                                .map(PathBuf::from)
-                                .filter(|path| path.is_dir())
-                            {
+                            if let Some(directory) = directory.clone() {
                                 let options = crate::model::CreateOptions {
                                     asset_id: Some(asset.id),
                                     size: Some(asset.size),
                                     official_sha256: asset.sha256.clone(),
                                     preferred_route: None,
+                                    ..Default::default()
                                 };
                                 if let Err(error) = self
                                     .manager
                                     .create_with(asset.url.clone(), directory, options)
                                     .await
                                 {
-                                    eprintln!("自动下载 {repository} 失败：{error}");
+                                    failure = Some(format!(
+                                        "自动下载入队失败：{error}；可手动下载最新版重试"
+                                    ));
                                 }
                             }
+                        }
+                        if let Some(error) = failure {
+                            let mut favorite = favorite;
+                            favorite.error = Some(error);
+                            self.manager.update_favorite(favorite, false).await?;
+                        } else if !key.is_empty() {
+                            entry.last_downloaded_asset = Some(key);
+                            self.manager.update_watch(favorite, entry, false).await?;
                         }
                     }
                     Err(error) => {
@@ -560,6 +550,7 @@ impl Library {
                 .api_status(self.catalog.api_status().await)
                 .await?;
             return Ok(Checked {
+                release: None,
                 favorite,
                 entry,
                 notify: false,
@@ -567,13 +558,15 @@ impl Library {
             });
         };
         let auto = favorite.latest.is_some()
-            && favorite.latest.as_ref().map(|latest| latest.id) != Some(release.id)
-            && (settings.watch_auto_download || entry.rule.auto_download);
+            && favorite.latest.as_ref().map(|latest| &latest.tag) != Some(&release.tag)
+            && !entry.skipped_release_ids.contains(&release.id)
+            && entry.rule.automatic(settings.watch_auto_download);
         let mut assets = if auto {
-            Selection::new(settings, &entry.rule).select(&release)
+            Selection::new(settings, &entry.rule).select(&release)?
         } else {
             Vec::new()
         };
+        let full = release.clone();
         let notify = apply_watch_release(&mut favorite, &mut entry, release, interval);
         self.manager
             .api_status(self.catalog.api_status().await)
@@ -586,49 +579,16 @@ impl Library {
                 .join(",");
             if entry.last_downloaded_asset.as_deref() == Some(key.as_str()) {
                 assets.clear();
-            } else {
-                entry.last_downloaded_asset = Some(key);
             }
         }
         Ok(Checked {
+            release: Some(full),
             favorite,
             entry,
             notify,
             assets,
         })
     }
-}
-
-fn matches_pattern(pattern: &str, name: &str) -> bool {
-    let pattern = pattern.trim().to_ascii_lowercase();
-    let name = name.to_ascii_lowercase();
-    if pattern.is_empty() {
-        return false;
-    }
-    // 仅支持 `*` 与 `?` 的轻量通配，避免引入正则依赖。
-    let (pattern, name) = (pattern.as_bytes(), name.as_bytes());
-    let (mut p, mut n) = (0, 0);
-    let (mut star, mut retry) = (None, 0);
-    while n < name.len() {
-        if p < pattern.len() && (pattern[p] == b'?' || pattern[p] == name[n]) {
-            p += 1;
-            n += 1;
-        } else if p < pattern.len() && pattern[p] == b'*' {
-            star = Some(p);
-            p += 1;
-            retry = n;
-        } else if let Some(star) = star {
-            p = star + 1;
-            retry += 1;
-            n = retry;
-        } else {
-            return false;
-        }
-    }
-    while p < pattern.len() && pattern[p] == b'*' {
-        p += 1;
-    }
-    p == pattern.len()
 }
 
 /// 保留旧签名，供现有测试与调用方使用。
@@ -662,8 +622,24 @@ fn apply_watch_release(
         atom: release.atom,
     };
     let previous = favorite.latest.as_ref().map(|latest| latest.id);
-    let notify =
-        previous.is_some_and(|id| id != summary.id) && !favorite.seen.contains(&summary.id);
+    let same_tag = favorite
+        .latest
+        .as_ref()
+        .is_some_and(|latest| latest.tag == summary.tag);
+    let notify = previous.is_some() && !same_tag && !favorite.seen.contains(&summary.id);
+    if same_tag {
+        if entry.acked_release_id == previous {
+            entry.acked_release_id = Some(summary.id);
+        }
+        if entry.notified_release_id == previous {
+            entry.notified_release_id = Some(summary.id);
+        }
+        if previous.is_some_and(|id| entry.skipped_release_ids.contains(&id))
+            && !entry.skipped_release_ids.contains(&summary.id)
+        {
+            entry.skipped_release_ids.push(summary.id);
+        }
+    }
     if !favorite.seen.contains(&summary.id) {
         favorite.seen.push(summary.id);
     }
@@ -750,25 +726,37 @@ mod tests {
                 asset(3, "Tool.dmg", 5),
             ],
         );
-        assert_eq!(Selection::new(&settings, &rule).select(&release).len(), 1);
+        assert_eq!(
+            Selection::new(&settings, &rule)
+                .select(&release)
+                .unwrap()
+                .len(),
+            1
+        );
         rule.asset_pattern = Some("*win*.zip".into());
         assert_eq!(
-            Selection::new(&settings, &rule).select(&release)[0].name,
+            Selection::new(&settings, &rule).select(&release).unwrap()[0].name,
             "Tool-win-x64.zip"
         );
         rule.asset_pattern = Some("*tool*".into());
-        assert!(Selection::new(&settings, &rule).select(&release).is_empty());
+        assert!(Selection::new(&settings, &rule)
+            .select(&release)
+            .unwrap()
+            .is_empty());
         rule.asset_pattern = None;
         let mut off = settings.clone();
         off.watch_asset_mode = 2;
-        assert!(Selection::new(&off, &rule).select(&release).is_empty());
+        assert!(Selection::new(&off, &rule)
+            .select(&release)
+            .unwrap()
+            .is_empty());
 
         let mut versioned = release.clone();
         versioned.id = 2;
         versioned.tag = "v2.0.0".into();
         versioned.assets = vec![asset(4, "Tool-2.0.0.zip", 30)];
         rule.asset_pattern = Some("Tool-{version}.zip".into());
-        let selected = Selection::new(&settings, &rule).select(&versioned);
+        let selected = Selection::new(&settings, &rule).select(&versioned).unwrap();
         assert_eq!(selected.len(), 1);
         assert_eq!(selected[0].name, "Tool-2.0.0.zip");
     }

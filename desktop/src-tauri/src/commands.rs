@@ -23,13 +23,57 @@ use tauri::{AppHandle, Manager, State};
 pub enum Request {
     Bootstrap,
     Snapshot,
+    Software {
+        query: String,
+        page: u32,
+    },
+    SoftwareProjects,
+    WatchlistExport,
+    WatchlistExportFile,
+    WatchlistPreview {
+        manifest: String,
+        directory: PathBuf,
+        policy: String,
+    },
+    WatchlistImport {
+        manifest: String,
+        directory: PathBuf,
+        policy: String,
+        fingerprint: String,
+    },
+    Updates {
+        cursor: Option<String>,
+        limit: u32,
+        repository: Option<String>,
+        #[serde(default)]
+        recent: bool,
+    },
+    UpdateDetail {
+        id: u64,
+    },
+    UpdateAction {
+        id: u64,
+        action: String,
+    },
+    ProjectLabels {
+        repository: String,
+        group: String,
+        tags: Vec<String>,
+    },
     Browse {
         input: String,
         page: u32,
         include_prerelease: bool,
     },
+    SelectAssets {
+        release: githubsp_lib::catalog::Release,
+        preference: Option<githubsp_lib::selection::AssetPreference>,
+        pattern: Option<String>,
+    },
     Preview {
         urls: Vec<String>,
+        #[serde(default)]
+        sizes: std::collections::HashMap<String, u64>,
         directory: PathBuf,
     },
     Create {
@@ -62,6 +106,8 @@ pub enum Request {
         query: String,
         status: Option<TaskStatus>,
         page: u32,
+        #[serde(default)]
+        page_size: Option<u32>,
     },
     FavoriteAdd {
         input: String,
@@ -275,6 +321,20 @@ pub async fn dispatch(
             );
         }
         Request::Snapshot => manager.snapshot().await,
+        Request::SelectAssets {
+            release,
+            preference,
+            pattern,
+        } => {
+            return value(
+                githubsp_lib::selection::recommend(
+                    &release,
+                    preference.as_ref(),
+                    pattern.as_deref(),
+                )
+                .map_err(|e| e.to_string())?,
+            );
+        }
         Request::Browse {
             input,
             page,
@@ -284,9 +344,13 @@ pub async fn dispatch(
             let _ = manager.api_status(catalog.api_status().await).await;
             return value(result.map_err(|e| e.to_string())?);
         }
-        Request::Preview { urls, directory } => {
+        Request::Preview {
+            urls,
+            sizes,
+            directory,
+        } => {
             return value(
-                intake::preview(manager, catalog, urls, &directory)
+                intake::preview(manager, catalog, urls, &sizes, &directory)
                     .await
                     .map_err(|e| e.to_string())?,
             )
@@ -354,9 +418,15 @@ pub async fn dispatch(
             query,
             status,
             page,
+            page_size,
         } => {
             let result: HistoryPage = manager
-                .history(query, status, page)
+                .history_sized(
+                    query,
+                    status,
+                    page,
+                    page_size.map_or(githubsp_lib::history::PAGE_SIZE, |size| size as usize),
+                )
                 .await
                 .map_err(|e| e.to_string())?;
             return value(result);
@@ -370,6 +440,98 @@ pub async fn dispatch(
             service.library.download_latest(repository).await
         }
         Request::WatchRule { repository, rule } => manager.watch_rule(repository, rule).await,
+        Request::Updates {
+            cursor,
+            limit,
+            repository,
+            recent,
+        } => {
+            return value(
+                manager
+                    .update_page(cursor, limit, repository, recent)
+                    .await
+                    .map_err(|e| e.to_string())?,
+            )
+        }
+        Request::UpdateDetail { id } => {
+            return value(manager.update_event(id).await.map_err(|e| e.to_string())?)
+        }
+        Request::Software { query, page } => {
+            return value(
+                manager
+                    .software(query, page)
+                    .await
+                    .map_err(|e| e.to_string())?,
+            )
+        }
+        Request::SoftwareProjects => {
+            return value(
+                manager
+                    .software_projects()
+                    .await
+                    .map_err(|e| e.to_string())?,
+            )
+        }
+        Request::WatchlistExport => {
+            return value(
+                manager
+                    .watchlist_export()
+                    .await
+                    .map_err(|e| e.to_string())?,
+            )
+        }
+        Request::WatchlistPreview {
+            manifest,
+            directory,
+            policy,
+        } => {
+            return value(
+                manager
+                    .watchlist_preview(manifest, directory, policy)
+                    .await
+                    .map_err(|e| e.to_string())?,
+            )
+        }
+        Request::WatchlistImport {
+            manifest,
+            directory,
+            policy,
+            fingerprint,
+        } => {
+            manager
+                .import_watchlist(manifest, directory, policy, fingerprint)
+                .await
+        }
+        Request::WatchlistExportFile => {
+            let Some(file) = rfd::AsyncFileDialog::new()
+                .set_title("导出可迁移关注清单")
+                .set_file_name("GitHubSP-watchlist.json")
+                .add_filter("JSON", &["json"])
+                .save_file()
+                .await
+            else {
+                return Ok(Value::Null);
+            };
+            let manifest = manager
+                .watchlist_export()
+                .await
+                .map_err(|e| e.to_string())?;
+            let path = file.path().to_owned();
+            let target = path.clone();
+            tauri::async_runtime::spawn_blocking(move || {
+                githubsp_lib::watchlist::write_file(&manifest, &target)
+            })
+            .await
+            .map_err(|e| e.to_string())?
+            .map_err(|e| e.to_string())?;
+            return value(path);
+        }
+        Request::UpdateAction { id, action } => manager.update_action(id, action).await,
+        Request::ProjectLabels {
+            repository,
+            group,
+            tags,
+        } => manager.project_labels(repository, group, tags).await,
         Request::SaveSettings { settings } => manager.settings(settings).await,
         Request::Diagnose { url } => manager.diagnose(&url).await,
         Request::Acknowledge => manager.acknowledge().await,
@@ -481,7 +643,7 @@ pub async fn dispatch(
             return Ok(Value::Null);
         }
         Request::ShowMain { view } => {
-            if !matches!(view.as_str(), "queue" | "favorites") {
+            if !matches!(view.as_str(), "queue" | "software") {
                 return Err("无效的目标页面".into());
             }
             crate::show_main(&app);

@@ -304,6 +304,28 @@ impl Store {
     pub fn save(&self, record: &StoredTask) -> Result<()> {
         let transaction = self.connection.unchecked_transaction()?;
         write_record(&transaction, record, false)?;
+        if record.task.status == TaskStatus::Completed {
+            if let (Some(repository), Some(tag)) =
+                (&record.task.details.repository, &record.task.details.tag)
+            {
+                let value: Option<String> = transaction
+                    .query_row(
+                        "SELECT value FROM settings WHERE key='update_ledger'",
+                        [],
+                        |row| row.get(0),
+                    )
+                    .optional()?;
+                if let Some(value) = value {
+                    let mut ledger: crate::update_center::Ledger = serde_json::from_str(&value)?;
+                    if ledger.downloaded(repository, tag, &record.task.id)? {
+                        transaction.execute(
+                            "UPDATE settings SET value=?1 WHERE key='update_ledger'",
+                            [serde_json::to_string(&ledger)?],
+                        )?;
+                    }
+                }
+            }
+        }
         transaction.commit()?;
         Ok(())
     }
@@ -311,9 +333,30 @@ impl Store {
     pub fn insert(&mut self, record: &StoredTask) -> Result<()> {
         let transaction = self.connection.transaction()?;
         write_record(&transaction, record, true)?;
+        if let Some(key) = &record.task.details.agent_request_key {
+            transaction.execute(
+                "INSERT INTO settings(key,value) VALUES (?1,?2)",
+                params![
+                    format!("agent_request:{key}"),
+                    serde_json::to_string(&record.task.id)?
+                ],
+            )?;
+        }
         transaction.execute("INSERT INTO settings(key,value) VALUES ('last_directory',?1) ON CONFLICT(key) DO UPDATE SET value=excluded.value", [record.task.directory.to_string_lossy().as_ref()])?;
         transaction.commit()?;
         Ok(())
+    }
+
+    pub fn agent_task(&self, key: &str) -> Result<Option<StoredTask>> {
+        let Some(id) = self.get_json::<String>(&format!("agent_request:{key}"))? else {
+            return Ok(None);
+        };
+        self.task(&id)?.map(Some).ok_or_else(|| {
+            DownloadError::new(
+                ErrorKind::NotFound,
+                "该幂等请求对应的任务已删除，未重新创建；请使用新的请求键",
+            )
+        })
     }
 
     pub fn remove_completed(&self) -> Result<usize> {
@@ -333,6 +376,24 @@ impl Store {
         page: u32,
         revision: u64,
     ) -> Result<HistoryPage> {
+        self.query_history_sized(query, status, page, PAGE_SIZE, revision)
+    }
+
+    /// 与 [`Store::query_history`] 相同，但每页条数由界面选择（5–100）。
+    pub fn query_history_sized(
+        &mut self,
+        query: &str,
+        status: Option<TaskStatus>,
+        page: u32,
+        page_size: usize,
+        revision: u64,
+    ) -> Result<HistoryPage> {
+        if !history::PAGE_SIZE_RANGE.contains(&page_size) {
+            return Err(DownloadError::new(
+                ErrorKind::InvalidInput,
+                "每页条数需为 5–100",
+            ));
+        }
         let query = history::normalize_query(query, page)?;
         let transaction = self.connection.transaction()?;
         let mut predicates = Vec::new();
@@ -357,15 +418,15 @@ impl Store {
         )?;
         let total = usize::try_from(total)
             .map_err(|_| DownloadError::new(ErrorKind::Storage, "历史记录数量超出支持范围"))?;
-        let last = total.div_ceil(PAGE_SIZE).max(1).min(u32::MAX as usize) as u32;
+        let last = total.div_ceil(page_size).max(1).min(u32::MAX as usize) as u32;
         let page = page.min(last);
-        let offset = i64::from(page - 1) * PAGE_SIZE as i64;
+        let offset = i64::from(page - 1) * page_size as i64;
         let records = {
             let mut statement = transaction.prepare(&format!("SELECT id,created_at,payload,status,search_text,queue_position FROM tasks{predicate} ORDER BY created_at DESC,id DESC LIMIT ? OFFSET ?"))?;
-            parameters.push((PAGE_SIZE as i64).into());
+            parameters.push((page_size as i64).into());
             parameters.push(offset.into());
             let mut rows = statement.query(rusqlite::params_from_iter(&parameters))?;
-            let mut records = Vec::with_capacity(PAGE_SIZE);
+            let mut records = Vec::with_capacity(page_size);
             while let Some(row) = rows.next()? {
                 records.push(decode(row)?.task);
             }
@@ -377,7 +438,7 @@ impl Store {
             items: records.into_iter().map(history::entry).collect(),
             total,
             page,
-            page_size: PAGE_SIZE,
+            page_size,
             revision,
         })
     }
@@ -441,6 +502,67 @@ impl Store {
     pub fn save_favorite(&self, favorite: &crate::model::Favorite) -> Result<()> {
         self.connection.execute("INSERT INTO favorites(repository,payload) VALUES (?1,?2) ON CONFLICT(repository) DO UPDATE SET payload=excluded.payload", params![favorite.repository, serde_json::to_string(favorite)?])?;
         Ok(())
+    }
+    pub fn save_center(
+        &self,
+        favorite: Option<&crate::model::Favorite>,
+        state: &crate::model::WatchState,
+        ledger: &crate::update_center::Ledger,
+    ) -> Result<()> {
+        ledger.validate()?;
+        let transaction = self.connection.unchecked_transaction()?;
+        if let Some(favorite) = favorite {
+            transaction.execute("INSERT INTO favorites(repository,payload) VALUES (?1,?2) ON CONFLICT(repository) DO UPDATE SET payload=excluded.payload", params![favorite.repository, serde_json::to_string(favorite)?])?;
+        }
+        for (key, value) in [
+            ("watch_state", serde_json::to_string(state)?),
+            ("update_ledger", serde_json::to_string(ledger)?),
+        ] {
+            transaction.execute("INSERT INTO settings(key,value) VALUES (?1,?2) ON CONFLICT(key) DO UPDATE SET value=excluded.value", params![key,value])?;
+        }
+        transaction.commit()?;
+        Ok(())
+    }
+    pub fn save_watchlist(
+        &self,
+        favorites: &[crate::model::Favorite],
+        state: &crate::model::WatchState,
+    ) -> Result<()> {
+        let transaction = self.connection.unchecked_transaction()?;
+        for favorite in favorites {
+            transaction.execute("INSERT INTO favorites(repository,payload) VALUES (?1,?2) ON CONFLICT(repository) DO UPDATE SET payload=excluded.payload", params![favorite.repository, serde_json::to_string(favorite)?])?;
+        }
+        transaction.execute("INSERT INTO settings(key,value) VALUES ('watch_state',?1) ON CONFLICT(key) DO UPDATE SET value=excluded.value", [serde_json::to_string(state)?])?;
+        transaction.commit()?;
+        Ok(())
+    }
+    pub fn matching_completed(&self, repository: &str, tag: &str) -> Result<Vec<String>> {
+        let mut statement = self.connection.prepare("SELECT id,created_at,payload,status,search_text,queue_position FROM tasks WHERE status='completed'")?;
+        let mut rows = statement.query([])?;
+        let mut ids = Vec::new();
+        while let Some(row) = rows.next()? {
+            let task = decode(row)?.task;
+            if task
+                .details
+                .repository
+                .as_deref()
+                .is_some_and(|repo| repo.eq_ignore_ascii_case(repository))
+                && task.details.tag.as_deref() == Some(tag)
+            {
+                ids.push(task.id);
+            }
+        }
+        Ok(ids)
+    }
+    /// 「我的软件」按项目汇总时读取已完成任务，最多读取 limit 条，按添加时间倒序。
+    pub fn completed_tasks(&self, limit: usize) -> Result<Vec<crate::model::Task>> {
+        let mut statement = self.connection.prepare("SELECT id,created_at,payload,status,search_text,queue_position FROM tasks WHERE status='completed' ORDER BY created_at DESC,id DESC LIMIT ?1")?;
+        let mut rows = statement.query([i64::try_from(limit).unwrap_or(i64::MAX)])?;
+        let mut tasks = Vec::new();
+        while let Some(row) = rows.next()? {
+            tasks.push(decode(row)?.task);
+        }
+        Ok(tasks)
     }
     pub fn remove_favorite(&self, repository: &str) -> Result<()> {
         self.connection.execute(

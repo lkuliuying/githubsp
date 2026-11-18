@@ -1,4 +1,5 @@
 import { PageHeader, usePageActiveRef } from "@/components/PageActivity";
+import { AssetPreferenceFields } from "@/components/AssetPreferenceFields";
 import { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -10,17 +11,21 @@ import {
   FolderOpen,
   GitBranch,
   Link,
-  List,
   Package,
   RefreshCw,
 } from "lucide-react";
 import { navigate, notify, request, useWorkspace } from "@/lib/api";
+import { detectSource } from "@/lib/source";
 import {
   bytes,
   date,
+  defaultPreference,
+  type AssetPreference,
+  type Recommendation,
   type BatchItem,
   type BatchPreview,
   type CatalogPage,
+  routeOptions,
   type Snapshot,
 } from "@/lib/model";
 import { Button } from "@/components/ui/button";
@@ -29,19 +34,19 @@ import { Modal } from "@/components/ui/dialog";
 import { Empty, useConfirm, useJob } from "@/components/common";
 
 const draft = {
-  mode: "repository",
-  repository: "",
-  urls: "",
+  source: "",
   directory: "",
   route: "",
+  autoload: false,
 };
-export function openRepository(repository: string) {
-  draft.repository = repository.startsWith("https://")
+/** 打开新建下载并填入地址；仓库地址默认直接读取版本。 */
+export function openRepository(repository: string, autoload = true) {
+  draft.source = repository.startsWith("https://")
     ? repository
     : `https://github.com/${repository}`;
-  draft.mode = "repository";
+  draft.autoload = autoload;
   window.dispatchEvent(
-    new CustomEvent("githubsp:repository", { detail: draft.repository }),
+    new CustomEvent("githubsp:repository", { detail: draft.source }),
   );
   navigate("new");
 }
@@ -85,9 +90,21 @@ function platform(name: string) {
 export function NewDownload() {
   const visible = usePageActiveRef();
   const { snapshot, connected } = useWorkspace();
-  const [mode, setMode] = useState(draft.mode);
-  const [repository, setRepository] = useState(draft.repository);
-  const [urls, setUrls] = useState(draft.urls);
+  const [source, setSource] = useState(draft.source);
+  const [autoload, setAutoload] = useState(draft.autoload);
+  const detected = detectSource(source);
+  const mode = detected.kind === "links" ? "direct" : "repository";
+  const repository = detected.kind === "repository" ? detected.lines[0] : "";
+  const urls = detected.kind === "links" ? detected.lines.join("\n") : "";
+  const changeSource = (value: string) => {
+    draft.source = value;
+    setSource(value);
+    epoch.current++;
+    setCatalog(null);
+    setBrowseError(null);
+    setSelected([]);
+    setPreview(null);
+  };
   const [directory, setDirectory] = useState(
     draft.directory || snapshot?.lastDirectory || "",
   );
@@ -100,6 +117,10 @@ export function NewDownload() {
   const [includePrerelease, setPrerelease] = useState(false);
   const [filter, setFilter] = useState("all");
   const [notes, setNotes] = useState(false);
+  const [preference, setPreference] = useState<AssetPreference>(defaultPreference);
+  const [recommendation, setRecommendation] = useState<Recommendation | null>(null);
+  const [selectionError, setSelectionError] = useState<string | null>(null);
+  const selectionTouched = useRef(false);
   const [preview, setPreview] = useState<BatchPreview | null>(null);
   const [results, setResults] = useState<BatchItem[] | null>(null);
   const epoch = useRef(0);
@@ -107,8 +128,8 @@ export function NewDownload() {
   const confirm = useConfirm();
   useEffect(() => {
     const open = (event: Event) => {
-      setMode("repository");
-      setRepository((event as CustomEvent<string>).detail);
+      setSource((event as CustomEvent<string>).detail);
+      setAutoload(draft.autoload);
       setCatalog(null);
       setSelected([]);
       setBrowseError(null);
@@ -118,7 +139,42 @@ export function NewDownload() {
     window.addEventListener("githubsp:repository", open);
     return () => window.removeEventListener("githubsp:repository", open);
   }, []);
+  useEffect(() => {
+    if (!autoload || !connected) return;
+    setAutoload(false);
+    draft.autoload = false;
+    if (detected.kind === "repository") load();
+  }, [autoload, connected, source]);
   const release = catalog?.releases.find((r) => r.id === releaseId);
+  const projectRule = catalog
+    ? snapshot?.watchState.repositories[catalog.repository.toLowerCase()]?.rule
+    : undefined;
+  const pattern = projectRule?.assetPattern || snapshot?.settings.watchAssetPattern || null;
+  useEffect(() => {
+    epoch.current++;
+    setPreview(null);
+    setSelected([]);
+    setRecommendation(null);
+    setSelectionError(null);
+    selectionTouched.current = false;
+    if (!release) return;
+    let cancelled = false;
+    request<Recommendation>("selectAssets", { release, preference, pattern })
+      .then(result => {
+        if (cancelled) return;
+        setRecommendation(result);
+        if (snapshot?.settings.autoMatchPlatform && !selectionTouched.current)
+          setSelected(result.selectedUrls);
+      })
+      .catch(error => { if (!cancelled) setSelectionError(String(error)); });
+    return () => { cancelled = true; };
+  }, [release, preference, pattern, snapshot?.settings.autoMatchPlatform]);
+  const selectManually = (urls: string[]) => {
+    selectionTouched.current = true;
+    epoch.current++;
+    setPreview(null);
+    setSelected(urls);
+  };
   const eligible = (release?.assets ?? []).filter(
     (a) => !a.unavailable && (filter === "all" || platform(a.name) === filter),
   );
@@ -155,16 +211,8 @@ export function NewDownload() {
         if (!more) {
           const first = next.releases[0];
           setRelease(first?.id ?? null);
-          setSelected(
-            snapshot?.settings.autoMatchPlatform
-              ? (first?.assets
-                  .filter(
-                    (a) => platform(a.name) === "windows" && !a.unavailable,
-                  )
-                  .slice(0, 100)
-                  .map((a) => a.url) ?? [])
-              : [],
-          );
+          setPreference(snapshot?.watchState.repositories[next.repository.toLowerCase()]?.rule.preference ?? defaultPreference);
+          setSelected([]);
         }
       } catch (error) {
         if (active.current && revision === epoch.current)
@@ -218,6 +266,15 @@ export function NewDownload() {
                 .split(/\r?\n/)
                 .map((v) => v.trim())
                 .filter(Boolean),
+        // 版本列表里已有附件大小，一并交给预览，省去再次查询。
+        sizes:
+          mode === "repository"
+            ? Object.fromEntries(
+                (release?.assets ?? [])
+                  .filter((asset) => selected.includes(asset.url))
+                  .map((asset) => [asset.url, asset.size]),
+              )
+            : {},
         directory: target,
       });
       if (!active.current || !visible.current || revision !== epoch.current)
@@ -239,91 +296,67 @@ export function NewDownload() {
         </Button>
       </PageHeader>
       <div className="new-content">
-        <div className="source-types" role="group" aria-label="下载来源">
-          {[
-            ["repository", "仓库附件", GitBranch],
-            ["direct", "附件直链", Link],
-            ["batch", "批量链接", List],
-          ].map(([key, label, Icon]) => (
-            <button
-              key={String(key)}
-              aria-pressed={mode === key}
-              disabled={busy}
-              className={mode === key ? "selected" : ""}
-              onClick={() => {
-                setMode(String(key));
-                draft.mode = String(key);
-                setBrowseError(null);
-                epoch.current++;
-              }}
-            >
-              <Icon size={16} />
-              <span>{String(label)}</span>
-            </button>
-          ))}
-        </div>
         <div className="source-input">
           <label className="field-label" htmlFor="source-url">
-            {mode === "repository"
-              ? "GitHub 仓库或 Release 地址"
-              : mode === "batch"
-                ? "附件下载链接，每行一条"
-                : "GitHub Release 附件直链"}
+            粘贴 GitHub 地址
+            <span className="muted">
+              仓库或 Release 页面地址，或者一个、多个附件链接（每行一个）
+            </span>
           </label>
           <div className="input-row">
-            {mode === "repository" ? (
-              <>
-                <Input
-                  id="source-url"
-                  placeholder="https://github.com/owner/repository"
-                  value={repository}
-                  disabled={busy}
-                  onChange={(e) => {
-                    draft.repository = e.target.value;
-                    setRepository(e.target.value);
-                    epoch.current++;
-                    setCatalog(null);
-                    setBrowseError(null);
-                    setSelected([]);
-                  }}
-                  onKeyDown={(e) => {
-                    if (
-                      e.key === "Enter" &&
-                      !e.nativeEvent.isComposing &&
-                      repository.trim()
-                    )
-                      load();
-                  }}
-                />
-                <Button
-                  variant="default"
-                  disabled={busy || !connected || !repository.trim()}
-                  onClick={() => load()}
-                >
-                  <RefreshCw size={15} className={browsing ? "spin" : ""} />
-                  {browsing
-                    ? "正在读取…"
-                    : browseError
-                      ? "重新读取"
-                      : "读取版本"}
-                </Button>
-              </>
-            ) : (
-              <textarea
-                id="source-url"
-                className="input url-textarea"
-                rows={mode === "batch" ? 5 : 3}
-                placeholder="https://github.com/owner/repo/releases/download/v1.0/file.zip"
-                value={urls}
-                disabled={busy}
-                onChange={(e) => {
-                  draft.urls = e.target.value;
-                  setUrls(e.target.value);
-                  epoch.current++;
-                }}
-              />
+            <textarea
+              id="source-url"
+              className="input source-field"
+              rows={Math.min(Math.max(detected.lines.length, 1), 6)}
+              placeholder="https://github.com/owner/repository"
+              value={source}
+              disabled={busy}
+              spellCheck={false}
+              onChange={(e) => changeSource(e.target.value)}
+              onKeyDown={(e) => {
+                // 仓库地址按回车直接读取版本；附件链接仍可换行继续粘贴。
+                if (
+                  e.key === "Enter" &&
+                  !e.shiftKey &&
+                  !e.nativeEvent.isComposing &&
+                  detected.kind === "repository"
+                ) {
+                  e.preventDefault();
+                  load();
+                }
+              }}
+            />
+            {detected.kind !== "links" && (
+              <Button
+                variant="default"
+                disabled={
+                  busy || !connected || detected.kind !== "repository"
+                }
+                onClick={() => load()}
+              >
+                <RefreshCw size={15} className={browsing ? "spin" : ""} />
+                {browsing
+                  ? "正在读取…"
+                  : browseError
+                    ? "重新读取"
+                    : "读取版本"}
+              </Button>
             )}
           </div>
+          {detected.kind === "links" && (
+            <p className="source-hint" role="status">
+              <Link size={13} />
+              识别到 {detected.lines.length} 个附件链接
+              {detected.lines.length > 100 && "，每次最多 100 个"}
+              ，选好保存位置后点「预览并确认」。
+            </p>
+          )}
+          {detected.kind === "mixed" && (
+            <p className="source-hint is-warning" role="status">
+              <AlertCircle size={13} />
+              多行时每行都要是附件链接；仓库地址请单独粘贴。
+            </p>
+          )}
           {mode === "repository" && (
             <label className="checkbox-line">
               <input
@@ -420,6 +453,28 @@ export function NewDownload() {
                         </Markdown>
                       </div>
                     )}
+                    <div className="asset-preference-panel">
+                      <AssetPreferenceFields value={preference} onChange={setPreference} disabled={busy} />
+                      <div className="asset-preference-actions">
+                        <p role="status">{selectionError || recommendation?.message || "正在匹配附件…"}</p>
+                        <Button size="sm" variant="ghost" disabled={busy || !connected}
+                          onClick={() => run(async () => {
+                            const repository = catalog.repository;
+                            if (!snapshot?.favorites.some(favorite => favorite.repository.toLowerCase() === repository.toLowerCase()))
+                              await request("favoriteAdd", { input: `https://github.com/${repository}` });
+                            await request("watchRule", { repository, rule: {
+                              includePrerelease: projectRule?.includePrerelease ?? false,
+                              autoDownload: projectRule?.autoDownload ?? false,
+                              assetPattern: projectRule?.assetPattern ?? null,
+                              preference,
+                            } });
+                            notify("项目下载偏好已保存", "success");
+                          })}>
+                          {snapshot?.favorites.some(favorite => favorite.repository.toLowerCase() === catalog.repository.toLowerCase()) ? "保存项目偏好" : "关注并保存偏好"}
+                        </Button>
+                      </div>
+                      {pattern && <p className="form-note">同时匹配名称规则：{pattern}</p>}
+                    </div>
                     <div className="asset-toolbar">
                       <select
                         aria-label="附件平台筛选"
@@ -436,7 +491,7 @@ export function NewDownload() {
                         size="sm"
                         variant="ghost"
                         onClick={() =>
-                          setSelected(
+                          selectManually(
                             [
                               ...new Set([
                                 ...selected,
@@ -451,7 +506,7 @@ export function NewDownload() {
                       <Button
                         size="sm"
                         variant="ghost"
-                        onClick={() => setSelected([])}
+                        onClick={() => selectManually([])}
                       >
                         清空选择
                       </Button>
@@ -485,7 +540,7 @@ export function NewDownload() {
                                   selected.length >= 100)
                               }
                               onChange={(e) =>
-                                setSelected(
+                                selectManually(
                                   e.target.checked
                                     ? [...selected, asset.url]
                                     : selected.filter((v) => v !== asset.url),
@@ -497,6 +552,7 @@ export function NewDownload() {
                               <strong>{asset.name}</strong>
                               <small>
                                 {asset.unavailable ||
+                                  recommendation?.candidates.find(candidate => candidate.url === asset.url)?.reason ||
                                   asset.hints.join(" · ") ||
                                   "请确认平台和架构"}
                               </small>
@@ -509,7 +565,7 @@ export function NewDownload() {
                 ) : (
                   <Empty
                     title="这个仓库还没有发布版本"
-                    description="可以更换仓库地址，或使用附件直链下载。"
+                    description="换一个仓库地址，或者直接粘贴附件链接。"
                   />
                 )}
               </div>
@@ -543,8 +599,7 @@ export function NewDownload() {
               <div>
                 <h2>从一个 GitHub 项目开始</h2>
                 <p>
-                  读取仓库后，在这里选择发布版本和附件。也支持直接粘贴 Release
-                  页面地址。
+                  粘贴项目地址并读取版本，就可以挑选要下载的附件。也可以直接粘贴附件链接。
                 </p>
               </div>
             </div>
@@ -553,13 +608,9 @@ export function NewDownload() {
           <div className="direct-explainer">
             <Link size={24} />
             <div>
-              <h2>
-                {mode === "batch" ? "一次确认，依次下载" : "直达你需要的附件"}
-              </h2>
+              <h2>直接下载这些附件</h2>
               <p>
-                支持公开 GitHub Release
-                附件。提交前会检查保存目录并识别重复链接；大小未知时会在开始下载后更新。每批最多
-                100 项。
+                下一步会列出每个文件的大小，并提醒重复的下载。确认后按顺序加入下载队列。
               </p>
             </div>
           </div>
@@ -612,10 +663,12 @@ export function NewDownload() {
                 draft.route = e.target.value;
               }}
             >
-              <option value="">自动检测最快线路</option>
-              <option value="github">GitHub 直连</option>
-              <option value="gh-proxy">GH-Proxy</option>
-              <option value="ghproxy-net">ghproxy.net</option>
+              <option value="">自动选择最快线路</option>
+              {routeOptions(snapshot).map((option) => (
+                <option key={option.id} value={option.id}>
+                  {option.name}
+                </option>
+              ))}
             </select>
           </div>
         </div>
@@ -654,14 +707,17 @@ export function NewDownload() {
         busy={busy}
         wide
         title="确认下载任务"
-        description="核对附件与保存位置，创建后即可在队列中暂停或取消。"
+        description="核对文件和保存位置。加入队列后也可以随时暂停或取消。"
         footer={
           <>
             <span className="footer-summary">
-              {valid.length} 个有效附件 · {bytes(preview?.knownSize)}
-              {preview?.unknownCount
-                ? ` + ${preview.unknownCount} 个大小未知`
-                : ""}
+              {valid.length} 个文件
+              {preview && preview.unknownCount < valid.length &&
+                ` · 共 ${bytes(preview.knownSize)}`}
+              {!!preview?.unknownCount &&
+                (preview.unknownCount === valid.length
+                  ? " · 大小在下载时确定"
+                  : ` · 另有 ${preview.unknownCount} 个大小待定`)}
             </span>
             <Button disabled={busy} onClick={() => setPreview(null)}>
               返回修改
@@ -693,8 +749,7 @@ export function NewDownload() {
                     );
                     setResults(result.items);
                     setSelected(failed.map((item) => item.input));
-                    setUrls(failed.map((item) => item.input).join("\n"));
-                    draft.urls = failed.map((item) => item.input).join("\n");
+                    changeSource(failed.map((item) => item.input).join("\n"));
                     notify("部分任务未创建，请返回修改后重试。", "error");
                   }
                 })
@@ -725,6 +780,11 @@ export function NewDownload() {
                 <strong>{item.filename || item.input}</strong>
                 {item.message && <small>{item.message}</small>}
               </div>
+              {item.status !== "invalid" && (
+                <span className="preview-size">
+                  {item.size == null ? "大小待定" : bytes(item.size)}
+                </span>
+              )}
               {item.taskId && item.status === "duplicate" && (
                 <Button
                   size="sm"
@@ -742,7 +802,7 @@ export function NewDownload() {
         </div>
         {!!preview?.unknownCount && (
           <p className="form-note">
-            部分附件大小未知，无法完整估算磁盘空间；实际空间不足时下载会停止并保留错误信息。
+            有些文件暂时查不到大小，开始下载后会显示。磁盘空间是否够用也要等那时才能确认。
           </p>
         )}
       </Modal>

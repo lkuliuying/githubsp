@@ -336,6 +336,7 @@ async fn slow_download() -> (Fixture, Fixture, tempfile::TempDir, Manager) {
         fast_policy(),
     )
     .unwrap();
+    super::single_connection(&manager).await;
     manager
         .create(SOURCE.into(), root.path().into())
         .await

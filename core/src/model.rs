@@ -208,6 +208,9 @@ pub fn now_ms() -> u64 {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct TaskDetails {
+    pub agent_request_key: Option<String>,
+    pub agent_request_fingerprint: Option<String>,
+    pub sha256: Option<String>,
     pub repository: Option<String>,
     pub tag: Option<String>,
     pub asset_id: Option<u64>,
@@ -306,6 +309,11 @@ pub struct Settings {
     pub reduce_motion: bool,
     /// 打开版本页时按当前平台自动勾选附件。
     pub auto_match_platform: bool,
+    /// 网络配置在应用重启后生效，不改变正在进行的传输。
+    pub network: crate::network_settings::NetworkSettings,
+    pub agent: AgentSettings,
+    /// 每个下载任务的同时连接数（1–8），对之后开始的下载生效。
+    pub connections: u8,
 }
 
 impl Settings {
@@ -331,6 +339,9 @@ impl Default for Settings {
             log_enabled: true,
             reduce_motion: false,
             auto_match_platform: true,
+            network: Default::default(),
+            agent: Default::default(),
+            connections: crate::engine::DEFAULT_CONNECTIONS,
         }
     }
 }
@@ -338,10 +349,41 @@ impl Default for Settings {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct CreateOptions {
+    pub request_key: Option<String>,
     pub asset_id: Option<u64>,
     pub size: Option<u64>,
     pub official_sha256: Option<String>,
     pub preferred_route: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct AgentSettings {
+    pub enabled: bool,
+    pub allowed_directories: Vec<PathBuf>,
+}
+
+impl AgentSettings {
+    pub fn validate(&self) -> crate::error::Result<()> {
+        use crate::error::{DownloadError, ErrorKind};
+        if self.allowed_directories.len() > 20
+            || (self.enabled && self.allowed_directories.is_empty())
+        {
+            return Err(DownloadError::new(
+                ErrorKind::InvalidInput,
+                "Agent 接入需要配置 1–20 个允许目录",
+            ));
+        }
+        for root in &self.allowed_directories {
+            if !root.is_absolute() || !root.is_dir() {
+                return Err(DownloadError::new(
+                    ErrorKind::InvalidInput,
+                    "Agent 允许目录必须是已存在的绝对目录",
+                ));
+            }
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -401,18 +443,34 @@ pub struct ReleaseSummary {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct WatchRule {
+    /// 缺失时保留旧版“全局或项目”行为；显式保存后允许单个项目仅提醒。
+    pub auto_download_override: Option<bool>,
+    /// 关注清单导入后显式选择的本机根目录；不进入可迁移清单。
+    pub download_directory: Option<PathBuf>,
     /// 新版本是否包含 GitHub 预发布版本。
     pub include_prerelease: bool,
     /// 命中新版本后自动把匹配附件加入下载队列（仅在“自动检查”开启时生效）。
     pub auto_download: bool,
     /// 自动下载的附件名匹配：精确、`prefix*`、`*suffix` 或 `*contains*`，不区分大小写。
     pub asset_pattern: Option<String>,
+    /// 显式保存时才启用组合偏好，既有通配符继续保持原语义。
+    pub preference: Option<crate::selection::AssetPreference>,
 }
 
-/// 收藏仓库的未读与已提醒状态，独立于 `Favorite` 持久化，避免旧数据库迁移。
+impl WatchRule {
+    pub fn automatic(&self, global: bool) -> bool {
+        self.auto_download_override
+            .unwrap_or(global || self.auto_download)
+    }
+}
+
+/// 收藏仓库的未读与已提醒状态，独立于 `Favorite` 持久化。
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct WatchEntry {
+    pub group: String,
+    pub tags: Vec<String>,
+    pub skipped_release_ids: Vec<u64>,
     /// 最近一次被用户在当前主窗口确认过的版本 ID。
     pub acked_release_id: Option<u64>,
     /// 最近一次已弹窗/写托盘提示的版本 ID。
@@ -457,7 +515,10 @@ impl WatchState {
 
     pub fn is_unread(&self, favorite: &Favorite) -> bool {
         match (&favorite.latest, self.entry(&favorite.repository)) {
-            (Some(latest), Some(entry)) => entry.acked_release_id != Some(latest.id),
+            (Some(latest), Some(entry)) => {
+                entry.acked_release_id != Some(latest.id)
+                    && !entry.skipped_release_ids.contains(&latest.id)
+            }
             (Some(_), None) => true,
             (None, _) => false,
         }

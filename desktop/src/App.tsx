@@ -21,33 +21,24 @@ import {
   useWorkspace,
 } from "./lib/api";
 import { Navigation } from "./components/Navigation";
+import { setThemeMode, useAppearance } from "./lib/appearance";
 import { PageHost } from "./components/PageHost";
 import { Button } from "./components/ui/button";
 import { Busy, useConfirm, useJob } from "./components/common";
 import { Queue } from "./views/Queue";
 import { NewDownload } from "./views/NewDownload";
-import { History } from "./views/History";
-import { Favorites } from "./views/Favorites";
-import { Routes } from "./views/Routes";
+import { MySoftware } from "./views/MySoftware";
 import { hasUnsavedSettings, Settings } from "./views/Settings";
 
 const pages = {
+  software: MySoftware,
   queue: Queue,
   new: NewDownload,
-  history: History,
-  favorites: Favorites,
-  routes: Routes,
   settings: Settings,
 };
 export function App() {
   const { snapshot, info, view, connected, error, message } = useWorkspace();
-  const [dark, setDark] = useState(() => {
-    try {
-      return localStorage.getItem("githubsp.theme") === "dark";
-    } catch {
-      return false;
-    }
-  });
+  const { dark } = useAppearance();
   const [notices, showNotices] = useState(false);
   const [systemReduced, setSystemReduced] = useState(
     () => matchMedia("(prefers-reduced-motion: reduce)").matches,
@@ -67,14 +58,6 @@ export function App() {
     void connect(controller.signal);
     return () => controller.abort();
   }, [connectionAttempt]);
-  useEffect(() => {
-    document.documentElement.classList.toggle("dark", dark);
-    try {
-      localStorage.setItem("githubsp.theme", dark ? "dark" : "light");
-    } catch {
-      notify("主题偏好无法保存，将在本次运行中生效。");
-    }
-  }, [dark]);
   useEffect(() => {
     document.documentElement.classList.toggle(
       "reduce-motion",
@@ -122,7 +105,7 @@ export function App() {
               variant="ghost"
               size="icon"
               aria-label={dark ? "切换浅色主题" : "切换深色主题"}
-              onClick={() => setDark(!dark)}
+              onClick={() => setThemeMode(dark ? "light" : "dark")}
             >
               {dark ? <Sun size={15} /> : <Moon size={15} />}
             </Button>
@@ -243,7 +226,7 @@ export function App() {
                     onClick={() => {
                       navigate(
                         notice.kind === "favorite_updated"
-                          ? "favorites"
+                          ? "software"
                           : "queue",
                       );
                       showNotices(false);

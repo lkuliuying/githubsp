@@ -5,6 +5,8 @@ use crate::{
 use serde::Serialize;
 
 pub const PAGE_SIZE: usize = 20;
+/// 界面可选的每页条数范围。
+pub const PAGE_SIZE_RANGE: std::ops::RangeInclusive<usize> = 5..=100;
 pub const RECENT_TASKS: usize = 50;
 
 #[derive(Serialize)]

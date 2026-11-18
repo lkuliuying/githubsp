@@ -6,6 +6,80 @@ use crate::{
 };
 
 #[test]
+fn project_preference_and_network_roundtrip_preserve_old_defaults_and_backup() {
+    use crate::{
+        model::{WatchEntry, WatchRule},
+        network_settings::{NetworkSettings, ProxyMode},
+        selection::AssetPreference,
+    };
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("tasks.sqlite3");
+    let store = Store::open(&path).unwrap();
+    let legacy: WatchRule = serde_json::from_str(
+        r#"{"includePrerelease":false,"autoDownload":false,"assetPattern":"*win*.zip"}"#,
+    )
+    .unwrap();
+    assert!(legacy.preference.is_none());
+    let preference = AssetPreference {
+        package: "portable".into(),
+        ..Default::default()
+    };
+    let mut state = WatchState::default();
+    state.repositories.insert(
+        "owner/repo".into(),
+        WatchEntry {
+            rule: WatchRule {
+                preference: Some(preference.clone()),
+                ..legacy
+            },
+            ..Default::default()
+        },
+    );
+    store.set_json("watch_state", &state).unwrap();
+    let network = NetworkSettings {
+        proxy_mode: ProxyMode::Custom,
+        proxy_url: "http://127.0.0.1:7890".into(),
+        ..Default::default()
+    };
+    store
+        .set_json(
+            "preferences",
+            &Settings {
+                network: network.clone(),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    let backup = root.path().join("backup.sqlite3");
+    store.export_backup(&backup, &|| false).unwrap();
+    store.close().unwrap();
+    for file in [&path, &backup] {
+        let reopened = Store::open(file).unwrap();
+        assert_eq!(reopened.settings().unwrap().network, network);
+        let restored: WatchState = reopened.get_json("watch_state").unwrap().unwrap();
+        assert_eq!(
+            restored
+                .entry("OWNER/REPO")
+                .unwrap()
+                .rule
+                .preference
+                .as_ref(),
+            Some(&preference)
+        );
+        assert_eq!(
+            restored
+                .entry("owner/repo")
+                .unwrap()
+                .rule
+                .asset_pattern
+                .as_deref(),
+            Some("*win*.zip")
+        );
+        reopened.close().unwrap();
+    }
+}
+
+#[test]
 fn resource_forms_and_rejected_boundaries() {
     for suffix in [
         "",
@@ -329,6 +403,7 @@ async fn batch_preview_partial_creation_and_favorites() {
         Engine {
             network: fixture.network.clone(),
             limiter: Arc::new(crate::limiter::RateLimiter::default()),
+            connections: Arc::default(),
         },
         Arc::new(|_| {}),
     )
@@ -338,6 +413,7 @@ async fn batch_preview_partial_creation_and_favorites() {
         &manager,
         &catalog,
         vec![source.clone(), source.clone(), "https://evil.test/x".into()],
+        &Default::default(),
         root.path(),
     )
     .await
@@ -351,11 +427,54 @@ async fn batch_preview_partial_creation_and_favorites() {
         ["valid", "duplicate", "invalid"]
     );
     assert_eq!(preview.known_size, 1024);
-    assert!(
-        crate::intake::preview(&manager, &catalog, vec![source.clone(); 101], root.path())
-            .await
-            .is_err()
-    );
+    // 带标签的直链不调用 API：界面提供的大小直接计入，未提供且没有线路时留到下载时确定。
+    let tagged = "https://github.com/test/repo/releases/download/v1.2.0/app-x64.exe".to_owned();
+    let other = "https://github.com/test/repo/releases/download/v1.2.0/other.zip".to_owned();
+    let hinted = crate::intake::preview(
+        &manager,
+        &catalog,
+        vec![tagged.clone(), other],
+        &[(tagged, 4096)].into_iter().collect(),
+        root.path(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(hinted.items[0].size, Some(4096));
+    assert_eq!(hinted.items[1].size, None);
+    assert_eq!((hinted.known_size, hinted.unknown_count), (4096, 1));
+    // 有线路时查询大小；下载地址返回 404 的附件标为无效，而不是「大小待定」。
+    let missing = ApiFixture::new(404).await;
+    let mut network = missing.network.clone();
+    network.routes = vec![crate::network::Route {
+        id: "fixture".into(),
+        name: "本地测试线路".into(),
+        prefix: Some(format!("{}/download/", missing.network.api_base)),
+    }];
+    let probing = crate::catalog::Catalog::new(network);
+    let checked = crate::intake::preview(
+        &manager,
+        &probing,
+        vec!["https://github.com/test/repo/releases/download/v1.2.0/gone.zip".into()],
+        &Default::default(),
+        root.path(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(checked.items[0].status, "invalid");
+    assert!(checked.items[0]
+        .message
+        .as_deref()
+        .unwrap()
+        .contains("找不到"));
+    assert!(crate::intake::preview(
+        &manager,
+        &catalog,
+        vec![source.clone(); 101],
+        &Default::default(),
+        root.path()
+    )
+    .await
+    .is_err());
     let result = crate::intake::create_batch(
         &manager,
         &catalog,
@@ -611,6 +730,7 @@ async fn application_update_asset_enters_existing_queue_with_duplicate_protectio
         Engine {
             network: fixture.network.clone(),
             limiter: Arc::new(crate::limiter::RateLimiter::default()),
+            connections: Arc::default(),
         },
         Arc::new(|_| {}),
     )
@@ -694,4 +814,52 @@ fn watch_state_roundtrips_in_settings_key_and_derives_unread() {
         .unwrap()
         .unwrap();
     assert!(!restored.is_unread(&favorite));
+}
+
+#[test]
+fn software_projects_group_by_repository_and_pick_latest_download() {
+    use crate::model::{Task, TaskStatus, Verification};
+    let root = tempfile::tempdir().unwrap();
+    let present = root.path().join("new.zip");
+    std::fs::write(&present, b"12345").unwrap();
+    let task = |repository: Option<&str>, tag: &str, completed: u64, path: std::path::PathBuf| {
+        let mut task = Task {
+            details: Default::default(),
+            id: uuid::Uuid::new_v4().to_string(),
+            url: "https://github.com/o/r/releases/download/v1/a.zip".into(),
+            filename: path.file_name().unwrap().to_string_lossy().into(),
+            directory: root.path().into(),
+            status: TaskStatus::Completed,
+            downloaded: 5,
+            total: Some(5),
+            speed: 0.0,
+            eta: None,
+            route: None,
+            verification: Verification::Unverified,
+            error: None,
+            final_path: Some(path),
+            created_at: 1,
+            revision: 1,
+        };
+        task.details.repository = repository.map(Into::into);
+        task.details.tag = Some(tag.into());
+        task.details.completed_at = Some(completed);
+        task
+    };
+    let projects = crate::software::projects(vec![
+        task(Some("Owner/Repo"), "v1", 10, root.path().join("old.zip")),
+        task(Some("owner/repo"), "v2", 20, present.clone()),
+        task(Some("other/tool"), "v9", 5, root.path().join("gone.zip")),
+        task(None, "v0", 30, root.path().join("loose.zip")),
+    ]);
+    assert_eq!(projects.len(), 2);
+    assert_eq!(projects[0].repository, "owner/repo");
+    assert_eq!(projects[0].tag.as_deref(), Some("v2"));
+    assert_eq!(projects[0].file_count, 2);
+    assert_eq!(projects[0].file_state, "present");
+    assert_eq!(projects[1].repository, "other/tool");
+    assert_eq!(projects[1].file_state, "missing");
+    std::fs::write(&present, b"123").unwrap();
+    let changed = crate::software::projects(vec![task(Some("owner/repo"), "v2", 20, present)]);
+    assert_eq!(changed[0].file_state, "changed_size");
 }

@@ -83,6 +83,14 @@ struct Cache {
     status: ApiStatus,
 }
 
+/// 预览时查询附件大小的结果；查不到时不影响下载，留到下载时确定。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AssetSize {
+    Known(u64),
+    Missing,
+    Unknown,
+}
+
 #[derive(Clone)]
 pub struct Catalog {
     network: Network,
@@ -100,6 +108,44 @@ impl Catalog {
     }
     pub fn stop(&self) {
         self.token.cancel();
+    }
+    /// 预览时只读取 1 字节的分段响应头来获得文件大小，不下载正文。
+    /// 只走第一条线路（正式环境为 GitHub 直连），不把附件地址发给加速服务。
+    pub async fn asset_size(&self, source: &crate::source::ReleaseSource) -> AssetSize {
+        match self.lookup_size(source).await {
+            Some(Ok(size)) => AssetSize::Known(size),
+            Some(Err(())) => AssetSize::Missing,
+            None => AssetSize::Unknown,
+        }
+    }
+    async fn lookup_size(
+        &self,
+        source: &crate::source::ReleaseSource,
+    ) -> Option<std::result::Result<u64, ()>> {
+        let route = self.network.routes.first()?;
+        let request = self
+            .network
+            .client
+            .get(route.url(source))
+            .header(reqwest::header::ACCEPT_ENCODING, "identity")
+            .header(reqwest::header::RANGE, "bytes=0-0")
+            .send();
+        let response = tokio::select! {
+            _ = self.token.cancelled() => return None,
+            result = tokio::time::timeout(std::time::Duration::from_secs(5), request) => result.ok()?.ok()?,
+        };
+        let status = response.status();
+        if status == reqwest::StatusCode::NOT_FOUND || status == reqwest::StatusCode::GONE {
+            Some(Err(()))
+        } else if status == reqwest::StatusCode::PARTIAL_CONTENT {
+            crate::network::content_range(&response)
+                .ok()
+                .map(|range| Ok(range.total))
+        } else if status.is_success() {
+            response.content_length().map(Ok)
+        } else {
+            None
+        }
     }
     #[cfg(test)]
     pub(crate) async fn expire_cache(&self) {

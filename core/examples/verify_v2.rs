@@ -64,7 +64,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Arc::new(|_| {}),
     )?;
     let result = async {
-        let preview = intake::preview(&manager, &catalog, selected.clone(), &directory).await?;
+        let preview = intake::preview(&manager, &catalog, selected.clone(), &Default::default(), &directory).await?;
         println!("{}", serde_json::json!({"repository":page.repository,"release":release.tag,"preview":preview}));
         if preview.items.iter().any(|item| item.status != "valid") { return Err("批量预览失败".into()); }
         let created = intake::create_batch(&manager, &catalog, selected, &directory, None).await?;

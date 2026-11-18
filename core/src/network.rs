@@ -9,6 +9,8 @@ use tokio_util::sync::CancellationToken;
 use url::Url;
 
 pub const PROBE_BYTES: u64 = 512 * 1024;
+/// 测速时至少收到这么多数据，才用部分样本估算速度。
+pub const PROBE_MIN_SAMPLE: u64 = 16 * 1024;
 
 pub fn report(route: &Route, result: &Result<Probe>) -> crate::model::RouteReport {
     crate::model::RouteReport {
@@ -21,7 +23,13 @@ pub fn report(route: &Route, result: &Result<Probe>) -> crate::model::RouteRepor
     }
 }
 
+#[cfg(test)]
 pub(crate) fn redirect_allowed(url: &Url, previous: usize) -> bool {
+    redirect_allowed_with(url, previous, &[])
+}
+
+/// `extra` 为用户添加的镜像主机，允许镜像把请求重定向到自身。
+pub(crate) fn redirect_allowed_with(url: &Url, previous: usize, extra: &[String]) -> bool {
     const HOSTS: &[&str] = &[
         "github.com",
         "api.github.com",
@@ -37,12 +45,19 @@ pub(crate) fn redirect_allowed(url: &Url, previous: usize) -> bool {
         && url.port().is_none()
         && url.username().is_empty()
         && url.password().is_none()
-        && url.host_str().is_some_and(|host| HOSTS.contains(&host))
+        && url
+            .host_str()
+            .is_some_and(|host| HOSTS.contains(&host) || extra.iter().any(|item| item == host))
 }
 
+#[cfg(test)]
 pub(crate) fn redirect_policy() -> reqwest::redirect::Policy {
-    reqwest::redirect::Policy::custom(|attempt| {
-        if redirect_allowed(attempt.url(), attempt.previous().len()) {
+    redirect_policy_with(Vec::new())
+}
+
+pub(crate) fn redirect_policy_with(extra: Vec<String>) -> reqwest::redirect::Policy {
+    reqwest::redirect::Policy::custom(move |attempt| {
+        if redirect_allowed_with(attempt.url(), attempt.previous().len(), &extra) {
             attempt.follow()
         } else {
             attempt.error("重定向目标不在允许列表或重定向次数超限")
@@ -78,32 +93,53 @@ pub struct Network {
 
 impl Network {
     pub fn production() -> Result<Self> {
-        let client = Client::builder()
+        Self::production_with(&Default::default())
+    }
+
+    pub fn production_with(settings: &crate::network_settings::NetworkSettings) -> Result<Self> {
+        use crate::network_settings::ProxyMode;
+        settings.validate()?;
+        let mirrors = settings.mirror_routes();
+        let builder = Client::builder()
             .user_agent(concat!("GitHubSP/", env!("CARGO_PKG_VERSION")))
             .connect_timeout(Duration::from_secs(10))
-            .redirect(redirect_policy())
-            .https_only(true)
-            .no_proxy()
-            .build()?;
+            .redirect(redirect_policy_with(
+                mirrors.iter().map(|(_, host, _)| host.clone()).collect(),
+            ))
+            .https_only(true);
+        let client = match settings.proxy_mode {
+            ProxyMode::Direct => builder.no_proxy(),
+            ProxyMode::System => builder,
+            ProxyMode::Custom => builder
+                .no_proxy()
+                .proxy(reqwest::Proxy::all(&settings.proxy_url)?),
+        }
+        .build()?;
+        let mut routes = vec![
+            Route {
+                id: "github".into(),
+                name: "GitHub 直连".into(),
+                prefix: None,
+            },
+            Route {
+                id: "gh-proxy".into(),
+                name: "GH-Proxy".into(),
+                prefix: Some("https://gh-proxy.org/".into()),
+            },
+            Route {
+                id: "ghproxy-net".into(),
+                name: "ghproxy.net".into(),
+                prefix: Some("https://ghproxy.net/".into()),
+            },
+        ];
+        routes.extend(mirrors.into_iter().map(|(id, host, prefix)| Route {
+            id,
+            name: host,
+            prefix: Some(prefix),
+        }));
         Ok(Self {
             client,
-            routes: vec![
-                Route {
-                    id: "github".into(),
-                    name: "GitHub 直连".into(),
-                    prefix: None,
-                },
-                Route {
-                    id: "gh-proxy".into(),
-                    name: "GH-Proxy".into(),
-                    prefix: Some("https://gh-proxy.org/".into()),
-                },
-                Route {
-                    id: "ghproxy-net".into(),
-                    name: "ghproxy.net".into(),
-                    prefix: Some("https://ghproxy.net/".into()),
-                },
-            ],
+            routes,
             api_base: "https://api.github.com".into(),
             probe_timeout: Duration::from_secs(10),
             idle_timeout: Duration::from_secs(30),
@@ -225,8 +261,20 @@ impl Network {
             let etag = strong_etag(&response);
             let html_type = is_html_type(&response);
             let mut sample = Vec::new();
+            // 慢速网络读不满 512 KB 时，用已收到的数据估算速度，避免所有线路都被判为超时。
+            // 从收到响应头开始计时，响应头本身较慢的线路不受影响。
+            let read_until = tokio::time::Instant::now() + self.probe_timeout.mul_f32(0.7);
+            let mut partial = false;
             while sample.len() < PROBE_BYTES as usize {
-                let Some(chunk) = response.chunk().await? else {
+                let chunk = match tokio::time::timeout_at(read_until, response.chunk()).await {
+                    Ok(chunk) => chunk?,
+                    Err(_) if sample.len() as u64 >= PROBE_MIN_SAMPLE => {
+                        partial = true;
+                        break;
+                    }
+                    Err(_) => return Err(DownloadError::new(ErrorKind::Network, "线路探测超时")),
+                };
+                let Some(chunk) = chunk else {
                     break;
                 };
                 let count = chunk.len().min(PROBE_BYTES as usize - sample.len());
@@ -234,7 +282,7 @@ impl Network {
             }
             reject_error_page(&sample, html_type, &source.filename)?;
             if let Some(total) = total {
-                if sample.len() as u64 != total.min(PROBE_BYTES) {
+                if !partial && sample.len() as u64 != total.min(PROBE_BYTES) {
                     return Err(protocol("线路探测内容被截断"));
                 }
             }
