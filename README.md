@@ -9,11 +9,11 @@
 
 [English](#english) · [下载 v0.4.0](https://github.com/lkuliuying/githubsp/releases/tag/v0.4.0) · [问题反馈](https://github.com/lkuliuying/githubsp/issues)
 
-> v0.4.0 重新整理了界面：侧边栏合并为 4 项，首页是带快速下载栏的下载队列，并新增「我的软件」、多连接分段下载、自定义镜像、主题色和界面缩放。更新内容见 [v0.4.0 发布说明](docs/v0.4.0.md)；上一版见 [v0.3.1 发布说明](docs/v0.3.1.md)。
+> v0.4.0 重新整理了界面：侧边栏合并为 4 项，首页是带快速下载栏的下载队列，并新增「我的软件」、多连接分段下载、自定义镜像、主题色和界面缩放。更新内容见 [v0.4.0 发布说明](docs/releases/v0.4.0.md)；上一版见 [v0.3.1 发布说明](docs/releases/v0.3.1.md)。
 
-v0.4.0 包含按[功能迭代方案](docs/2026-11-08-feature-expansion-plan.md)完成的 M0–M4：附件偏好与代理设置、[Harness 原生插件及 MCP](docs/agent-integration.md)、更新中心、软件文件库和关注清单迁移。开发期间的本地阶段记录（当时编号为 v0.3.2–v0.7.0，均未发布）保存在 [docs/milestones](docs/milestones/README.md)。
+v0.4.0 包含按[功能迭代方案](docs/design/2026-11-08-feature-expansion-plan.md)完成的 M0–M4：附件偏好与代理设置、[Harness 原生插件及 MCP](docs/agent-integration.md)、更新中心、软件文件库和关注清单迁移。开发期间的本地阶段记录（当时编号为 v0.3.2–v0.7.0，均未发布）保存在 [docs/milestones](docs/milestones/README.md)。
 
-界面重构的页面对照、各轮试用反馈和验证范围见[界面重构说明](docs/2026-11-18-software-centric-ui.md)。
+界面重构的页面对照、各轮试用反馈和验证范围见[界面重构说明](docs/design/2026-11-18-software-centric-ui.md)。
 
 原生插件已独立迭代到 v0.7.2，参考 DSH-better-sidebar，直接通过 Harness 原生「设置 → GitHubSP」显示数据目录设置，适配当前 0.2.2-rc.1。插件源码与验证边界见[独立仓库](https://github.com/lkuliuying/dsh-githubsp)和[接入说明](docs/agent-integration.md)。
 
@@ -102,21 +102,23 @@ cargo fmt --all -- --check
 ## 项目结构
 
 ```text
-core/                 下载、网络、SQLite、收藏、备份与迁移
-desktop/             React 前端与 Tauri 宿主
-integrations/        插件拆分时快照；后续在 dsh-githubsp 仓库维护
-native-desktop/       保留的 Slint 历史实现与测试
-scripts/              当前打包脚本及明确命名的历史验收工具
-docs/                架构、数据、历史版本说明与界面预览
-automation/          Slint 历史验收配置与基线
-artifacts/           本地交付包、参考源码和验证记录（不提交）
+core/                 下载、网络、SQLite、收藏、备份与迁移（Rust 库）
+desktop/              React 前端与 Tauri 宿主
+integrations/         插件拆分时快照；后续在 dsh-githubsp 仓库维护
+scripts/              验证、打包与桌面/Agent 验收脚本
+docs/                 架构、数据与 Agent 接入说明
+  releases/           各版本发布说明
+  design/             功能迭代与界面重构方案
+  milestones/         v0.4.0 发布前的本地阶段记录
+  images/             README 预览截图
+artifacts/            本地交付包、参考源码和验证记录（不提交）
 ```
 
-默认 Cargo 入口为 `githubsp-desktop`。Slint 源码保留用于旧版维护和兼容性比对，其脚本与截图不作为 Tauri 验收结果；使用方法见 [历史入口](docs/legacy/README.md)。旧技术栈调查、阶段计划和逐次验收日记已由当前文档取代，原文保留在 Git 历史。
+默认 Cargo 入口为 `githubsp-desktop`。旧版 Slint 实现（`native-desktop/`、`automation/` 及其脚本和工作流）已从仓库移除，需要时可从 [v0.3.0 标签](https://github.com/lkuliuying/githubsp/tree/v0.3.0) 或 Git 历史查看；v0.3.0 发布范围见 [v0.3.0 发布说明](docs/releases/v0.3.0.md)。
 
 ## 验证与限制
 
-v0.4.0 发布前回归通过 142 项核心、9 项 Tauri 宿主和 8 项前端测试，以及生产构建、Clippy 和格式检查；各轮界面改动都用隔离数据在真实桌面程序中截图核对。`verify-desktop-ui.cjs` 等完整桌面验收脚本已按新界面调整，但未在发布前重跑，见[界面重构说明](docs/2026-11-18-software-centric-ui.md#验证)。M0–M4 阶段另通过 3 项插件测试。实际 WebView2/IPC、已安装 Harness 运行时、Codex MCP 控制接口和 Claude Code MCP 回合分别保留证据；公开附件的暂停、桌面重启、续传和官方 SHA-256 对照通过。最终包的复验和未通过项见 [交付说明](docs/milestones/local-v0.7.0.md)。模拟 IPC 检查仍不代表完整桌面验收。
+v0.4.0 发布前回归通过 142 项核心、9 项 Tauri 宿主和 8 项前端测试，以及生产构建、Clippy 和格式检查；各轮界面改动都用隔离数据在真实桌面程序中截图核对。`verify-desktop-ui.cjs` 等完整桌面验收脚本已按新界面调整，但未在发布前重跑，见[界面重构说明](docs/design/2026-11-18-software-centric-ui.md#验证)。M0–M4 阶段另通过 3 项插件测试。实际 WebView2/IPC、已安装 Harness 运行时、Codex MCP 控制接口和 Claude Code MCP 回合分别保留证据；公开附件的暂停、桌面重启、续传和官方 SHA-256 对照通过。最终包的复验和未通过项见 [交付说明](docs/milestones/local-v0.7.0.md)。模拟 IPC 检查仍不代表完整桌面验收。
 
 - 公共加速服务和自定义镜像会收到公开附件 URL；短时探测不保证整文件持续速度。网速低于约 50 KB/s 时，测速用已收到的部分数据估算。
 - GitHub 未认证 API 可能限流；没有官方校验摘要时，不能据此确认文件来源的真实性。
@@ -125,7 +127,7 @@ v0.4.0 发布前回归通过 142 项核心、9 项 Tauri 宿主和 8 项前端�
 - 干净系统安装/卸载、缺失 WebView2、多 DPI/多显示器及固定运行时离线包仍未验收。
 - Harness 自然语言选工具质量未调用真实模型验证；Claude 插件 Skill 的额外模型工作流遇到当前服务超时。实际运行时/协议通过与这些未通过项分别记录。
 
-新增 Tauri CI 覆盖当前入口，历史 Slint 工作流继续保留；本轮没有提交、推送或执行远程 CI。Release 发布须显式手动触发。当前没有独立项目记忆文件，长期约定以本 README 及 `docs/` 中的现行说明为准。
+Tauri CI（`.github/workflows/desktop.yml`）覆盖当前入口，只验证不发布；Release 发布须显式手动执行。当前没有独立项目记忆文件，长期约定以本 README 及 `docs/` 中的现行说明为准。
 
 ## 许可与来源
 
@@ -139,4 +141,4 @@ The current Tauri source produces an NSIS installer and a portable ZIP. Both use
 
 Exit older versions before running a build. Portable normally shares the configured application data directory; `portable-mode.flag` beside the executable selects a local `data/` directory, and `--data-dir <absolute path>` selects isolated test data. Private repositories, Git clone, auto-generated source archives and automatic installation are not supported.
 
-Development and build commands are shown above. `core/` owns downloads and storage, `desktop/` is the current application, and `native-desktop/` retains the legacy implementation. Local tests and simulated UI checks do not establish clean-system installation or real-network acceptance. Project and third-party license notices are included with both distribution formats.
+Development and build commands are shown above. `core/` owns downloads and storage, and `desktop/` is the current application. The legacy Slint implementation was removed from the repository and remains available under the `v0.3.0` tag. Local tests and simulated UI checks do not establish clean-system installation or real-network acceptance. Project and third-party license notices are included with both distribution formats.

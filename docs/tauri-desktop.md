@@ -1,10 +1,10 @@
 # Tauri + React 桌面入口
 
-2026-11-07 确定使用 Tauri 2 + React + TypeScript + Rust。默认 Cargo 包为 `githubsp-desktop`；`native-desktop/` 的 Slint 实现作为历史入口保留，历史原生脚本仍明确针对 `githubsp-native`，不能把其截图或测试结果当作新界面的验收。
+2026-11-07 确定使用 Tauri 2 + React + TypeScript + Rust。默认 Cargo 包为 `githubsp-desktop`。旧版 Slint 实现及其脚本已从仓库移除，可在 `v0.3.0` 标签中查看。
 
 ## 结构与接口
 
-- `desktop/src/`：React 工作台。侧边栏为下载队列（默认首页，含快速下载栏和已完成历史）、新建下载、我的软件（含更新动态）、设置（含网络与线路检测）四项，另有独立提醒窗口。页面合并的来龙去脉见[界面重构说明](2026-11-18-software-centric-ui.md)。
+- `desktop/src/`：React 工作台。侧边栏为下载队列（默认首页，含快速下载栏和已完成历史）、新建下载、我的软件（含更新动态）、设置（含网络与线路检测）四项，另有独立提醒窗口。页面合并的来龙去脉见[界面重构说明](design/2026-11-18-software-centric-ui.md)。
 - `desktop/src-tauri/`：Tauri 窗口、托盘、受控命令、退出保存、数据位置和资源打包。
 - `core/`：沿用现有下载引擎、SQLite、历史分页、收藏检查、限流、数据迁移与更新源逻辑；本轮未重写下载或存储算法。
 - `desktop/src/lib/api.ts`：唯一的前端 IPC 入口。`dispatch` 使用带 `type` 的请求，Rust 保持输入校验与文件操作；浏览器预览不访问本地数据。
@@ -23,7 +23,7 @@
 
 设置页适配 magpie 的分类标签、跨分类搜索、行式偏好列表和“关／开”分段控件，分为通用、下载、网络、关注更新、Agent 接入、数据与备份、关于；网络分类包含代理设置和线路检测。分类改为左侧竖排导航，分类内再分组；普通设置改完即保存，网络代理与镜像单独保存并提示重启，不新增存储字段。切换分类或修改搜索后，迟到的更新检查和迁移目录检查不再弹出对话框；已确认的迁移命令沿用原流程。
 
-原创图标源文件为 `desktop/src/assets/app-icon.svg` 与 `tray-icon.svg`；Tauri 使用 `desktop/src-tauri/icons/` 的 ICO/PNG，安装器和卸载器显式使用同一 ICO。旧 Slint 图标资源保留。图标为石墨色底、白色几何包裹和蓝色下载切口。
+原创图标源文件为 `desktop/src/assets/app-icon.svg` 与 `tray-icon.svg`；Tauri 使用 `desktop/src-tauri/icons/` 的 ICO/PNG，安装器和卸载器显式使用同一 ICO。图标为石墨色底、白色几何包裹和蓝色下载切口。
 
 ## 开发与验证
 
@@ -94,7 +94,7 @@ cargo fmt -p githubsp-desktop --check
 
 `--data-dir` 只隔离业务数据，不隔离 WebView2 配置。旧版并行运行时本机曾出现 WebView2 `0x8007139F`；测试进程另设 `WEBVIEW2_USER_DATA_FOLDER` 后成功。普通试用应先退出旧版，不修改或删除已有 WebView2 数据。
 
-后续本地候选将设置与队列的限速统一为十进制 MB/s，KiB/s 存储契约保持兼容。新增 `.github/workflows/desktop.yml` 验证当前 Tauri 入口，`scripts/verify-desktop.ps1` 保留本机检查结果；历史 Native UI 工作流继续只验收 Slint，普通推送不自动发布。
+后续本地候选将设置与队列的限速统一为十进制 MB/s，KiB/s 存储契约保持兼容。新增 `.github/workflows/desktop.yml` 验证当前 Tauri 入口，`scripts/verify-desktop.ps1` 保留本机检查结果，普通推送不自动发布。
 
 v0.4.0 候选新增 `core/src/selection.rs`，由版本页和收藏自动下载共用附件选择逻辑。规则通过 `WatchRule.preference` 持久化，缺失时保持旧显式通配符的语义；未知架构或多个候选不自动决定。版本页的 `selectAssets` 为只读建议，下载创建仍经过原目录及来源校验。
 
