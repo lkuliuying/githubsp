@@ -1,0 +1,6 @@
+// 已通过实际 Harness 运行时验收的更新能力，供两个协议入口共用。
+export const updateTools = [
+  { name: 'githubsp_updates', op: 'updates', description: '按可重试游标读取 GitHubSP 本地关注更新。读取不标记已读，不推进服务端游标；处理成功后保存 nextCursor，重试使用原游标。首次关注建立基线，不回灌全部历史。列表省略正文，用 githubsp_update detail 读取。', parameters: { type: 'object', additionalProperties: false, properties: { cursor: { type: 'string' }, limit: { type: 'integer', minimum: 1, maximum: 100 }, repository: { type: 'string' } }, required: ['limit'] } },
+  { name: 'githubsp_update', op: 'update', description: '读取单条更新详情和完整 Release 来源正文（detail），或显式处理为已看到（seen）、忽略此版本（skip）、撤销忽略（unskip）。读取详情不标记已读。已下载附件单独记录；忽略不取消已接受下载。', parameters: { type: 'object', additionalProperties: false, properties: { id: { type: 'integer', minimum: 1 }, action: { type: 'string', enum: ['detail','seen','skip','unskip'] } }, required: ['id','action'] } },
+  { name: 'githubsp_project_labels', op: 'projectLabels', description: '为既有本地关注设置分组和标签。group 最多 40 字，tags 最多 12 个且各 1–40 字。空 group 或空 tags 可清除；不改变下载规则。', parameters: { type: 'object', additionalProperties: false, properties: { repository: { type: 'string' }, group: { type: 'string', maxLength: 40 }, tags: { type: 'array', maxItems: 12, items: { type: 'string', minLength: 1, maxLength: 40 } } }, required: ['repository','group','tags'] } },
+];

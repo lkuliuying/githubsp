@@ -34,7 +34,7 @@ try {
 }
 $desktopPackageVersion = (Get-Content -LiteralPath (Join-Path $desktopPackageFrontend 'package.json') -Raw | ConvertFrom-Json).version
 $desktopPackageBinary = Join-Path $desktopPackageRoot 'target/x86_64-pc-windows-msvc/release/githubsp-desktop.exe'
-$desktopPackageInstallers = @(Get-ChildItem -LiteralPath (Join-Path $desktopPackageRoot 'target/x86_64-pc-windows-msvc/release/bundle/nsis') -File -Filter '*-setup.exe')
+$desktopPackageInstallers = @(Get-ChildItem -LiteralPath (Join-Path $desktopPackageRoot 'target/x86_64-pc-windows-msvc/release/bundle/nsis') -File -Filter "GitHubSP_${desktopPackageVersion}_x64-setup.exe")
 if ($desktopPackageInstallers.Count -ne 1) { throw '安装器数量不唯一，停止交付。' }
 $desktopPackageStem = "GitHubSP-v$desktopPackageVersion-windows-x64"
 New-Item -ItemType Directory -Path $desktopPackageOutput -Force | Out-Null

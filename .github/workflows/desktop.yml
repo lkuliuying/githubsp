@@ -1,0 +1,59 @@
+name: Tauri desktop
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+      - name: 安装固定版本 pnpm 与前端依赖
+        run: |
+          npm install --global pnpm@10.32.1 --ignore-scripts
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          pnpm --dir desktop install --frozen-lockfile --ignore-scripts
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          pnpm --dir integrations/agent-tools install --frozen-lockfile --ignore-scripts
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.96.1
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: 获取锁定的依赖并生成许可证
+        run: |
+          cargo fetch --locked --target x86_64-pc-windows-msvc
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node desktop/scripts/notices.mjs --rust
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: 验证当前入口并构建两种分发
+        run: ./scripts/verify-desktop.ps1 -Offline -Package -OutputDirectory artifacts/verification/desktop-ci
+      - name: 核对源码未被构建改写
+        run: |
+          git diff --exit-code
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: desktop-${{ github.sha }}
+          path: artifacts/verification/desktop-ci/
+          if-no-files-found: error
+          retention-days: 14

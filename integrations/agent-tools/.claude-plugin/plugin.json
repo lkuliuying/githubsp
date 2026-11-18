@@ -1,0 +1,12 @@
+{
+  "name": "githubsp",
+  "version": "0.7.1",
+  "description": "通过本机 GitHubSP 复用下载文件、获取 GitHub Release 并管理本地关注更新。",
+  "homepage": "https://github.com/lkuliuying/githubsp",
+  "license": "MIT",
+  "author": {
+    "name": "lkuliuying",
+    "url": "https://github.com/lkuliuying"
+  },
+  "icon": "./.claude-plugin/512x512.png"
+}

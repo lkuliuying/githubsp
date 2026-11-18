@@ -1,0 +1,5 @@
+// 软件库和清单迁移已先通过实际 Harness 与桌面验收。
+export const softwareTools = [
+  { name: 'githubsp_software', op: 'software', description: '查询已下载的软件文件库，按仓库、版本或文件名分页查找。先复用本地存在的合适文件。fileState=present 表示路径存在且大小符合记录；missing/inaccessible/changed_size 不能称为可用。verificationAtDownload 是下载时的校验记录，不是重新校验或已安装状态。latestTag 仅为最近关注发现的标签，标签不同不自动代表更旧。', parameters: { type: 'object', additionalProperties: false, properties: { query: { type: 'string' }, page: { type: 'integer', minimum: 1 } } } },
+  { name: 'githubsp_watchlist', op: 'watchlist', description: '导出可迁移的本地关注 JSON（export，不含凭据和机器目录）；导入先 preview，展示 new/duplicate/conflict 与 add/keep/replace，再在用户确认内容和目录后以相同参数及 fingerprint 执行 import。keep 保留既有项目，replace 覆盖规则及标签。导入必须重新选择本机允许目录；不会自动读取文件、发布或写入远程 Star/Watch。', parameters: { type: 'object', additionalProperties: false, properties: { action: { type: 'string', enum: ['export','preview','import'] }, manifest: { type: 'string', description: 'JSON 关注清单正文' }, directory: { type: 'string', description: '重新确认的已有允许下载根目录' }, policy: { type: 'string', enum: ['keep','replace'] }, fingerprint: { type: 'string', description: '预览返回的指纹；导入必填' } }, required: ['action'] } },
+];
