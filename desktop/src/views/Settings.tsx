@@ -609,6 +609,12 @@ export function Settings() {
                     title="后台下载完成提醒"
                     description="窗口未处于前台时，显示下载完成提醒。"
                   />
+                  <SettingToggle
+                    checked={draft.clipboardDetect ?? true}
+                    onChange={(v) => field("clipboardDetect", v)}
+                    title="识别剪贴板中的 GitHub 链接"
+                    description="打开或切回窗口时，若剪贴板里有仓库、版本页或附件链接，在顶部提示下载。只在本机识别，不保存剪贴板内容。"
+                  />
                 </SettingsGroup>
                 <SettingsGroup title="显示">
                   <Preference

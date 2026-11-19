@@ -199,6 +199,8 @@ fn show_main(app: &tauri::AppHandle) {
         let _ = window.show();
         let _ = window.unminimize();
         let _ = window.set_focus();
+        // 系统可能拒绝抢占焦点，网页收不到 focus 事件；单独通知界面窗口已被唤起。
+        let _ = window.emit("window-activated", ());
     }
 }
 

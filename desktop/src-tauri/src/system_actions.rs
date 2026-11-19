@@ -1,27 +1,81 @@
-use std::{path::Path, ptr::null_mut};
+use std::{
+    path::Path,
+    ptr::null_mut,
+    sync::atomic::{AtomicU32, Ordering},
+};
 use windows_sys::Win32::System::{
-    DataExchange::{CloseClipboard, EmptyClipboard, OpenClipboard, SetClipboardData},
-    Memory::{GlobalAlloc, GlobalLock, GlobalUnlock, GMEM_MOVEABLE},
+    DataExchange::{
+        CloseClipboard, EmptyClipboard, GetClipboardData, GetClipboardSequenceNumber,
+        IsClipboardFormatAvailable, OpenClipboard, SetClipboardData,
+    },
+    Memory::{GlobalAlloc, GlobalLock, GlobalSize, GlobalUnlock, GMEM_MOVEABLE},
 };
 
+const CF_UNICODETEXT: u32 = 13;
+
+/// 本应用最近一次写入剪贴板后的序号；识别链接时跳过自己复制的内容。
+static OWN_SEQUENCE: AtomicU32 = AtomicU32::new(0);
+
+struct OpenedClipboard;
+impl Drop for OpenedClipboard {
+    fn drop(&mut self) {
+        unsafe {
+            CloseClipboard();
+        }
+    }
+}
+
+/// 剪贴板内容每次变化都会递增；不打开剪贴板，开销很小。
+pub fn clipboard_sequence() -> u32 {
+    unsafe { GetClipboardSequenceNumber() }
+}
+
+/// 当前剪贴板内容是否由本应用写入。
+pub fn clipboard_is_own(sequence: u32) -> bool {
+    sequence != 0 && OWN_SEQUENCE.load(Ordering::Relaxed) == sequence
+}
+
+/// 读取剪贴板文字；超过 `limit` 个 UTF-16 单元、没有文字或被占用时返回 `None`。
+pub fn read_text(limit: usize) -> Option<String> {
+    unsafe {
+        if IsClipboardFormatAvailable(CF_UNICODETEXT) == 0 || OpenClipboard(null_mut()) == 0 {
+            return None;
+        }
+        let _clipboard = OpenedClipboard;
+        let memory = GetClipboardData(CF_UNICODETEXT);
+        if memory.is_null() {
+            return None;
+        }
+        let units = GlobalSize(memory) / 2;
+        let pointer = GlobalLock(memory).cast::<u16>();
+        if pointer.is_null() {
+            return None;
+        }
+        let data = std::slice::from_raw_parts(pointer, units);
+        let length = data.iter().position(|&c| c == 0).unwrap_or(units);
+        let text = (length <= limit).then(|| String::from_utf16_lossy(&data[..length]));
+        GlobalUnlock(memory);
+        text
+    }
+}
+
 pub fn copy(text: &str, owner: windows_sys::Win32::Foundation::HWND) -> Result<(), String> {
+    write_text(text, owner)?;
+    // 关闭剪贴板后再记录序号，确保拿到的是这次写入后的值。
+    OWN_SEQUENCE.store(clipboard_sequence(), Ordering::Relaxed);
+    Ok(())
+}
+
+fn write_text(text: &str, owner: windows_sys::Win32::Foundation::HWND) -> Result<(), String> {
     if text.contains('\0') {
         return Err("链接包含无效字符".into());
     }
     let content: Vec<u16> = text.encode_utf16().chain(Some(0)).collect();
-    struct Clipboard;
-    impl Drop for Clipboard {
-        fn drop(&mut self) {
-            unsafe {
-                CloseClipboard();
-            }
-        }
-    }
     unsafe {
         if OpenClipboard(owner) == 0 {
             return Err("无法访问剪贴板，请稍后重试".into());
         }
-        let _clipboard = Clipboard;
+        let _clipboard = OpenedClipboard;
         let memory = GlobalAlloc(GMEM_MOVEABLE, content.len() * 2);
         if memory.is_null() {
             return Err("剪贴板分配内存失败".into());
@@ -33,7 +87,7 @@ pub fn copy(text: &str, owner: windows_sys::Win32::Foundation::HWND) -> Result<(
         }
         std::ptr::copy_nonoverlapping(content.as_ptr(), pointer.cast::<u16>(), content.len());
         GlobalUnlock(memory);
-        if EmptyClipboard() == 0 || SetClipboardData(13, memory).is_null() {
+        if EmptyClipboard() == 0 || SetClipboardData(CF_UNICODETEXT, memory).is_null() {
             windows_sys::Win32::Foundation::GlobalFree(memory);
             return Err("复制链接失败，请重试".into());
         }

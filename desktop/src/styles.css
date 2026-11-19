@@ -399,7 +399,7 @@ input[type="checkbox"]:focus-visible {
   min-height: 34px;
   padding: 0 12px;
   font-size: 13px;
-  font-weight: 550;
+  font-weight: 500;
   line-height: 1.2;
 }
 .button:not(:disabled):active {
@@ -551,7 +551,7 @@ input[type="checkbox"]:focus-visible {
 }
 .nav-item.active {
   color: var(--ink);
-  font-weight: 550;
+  font-weight: 500;
 }
 .nav-item.active > svg {
   color: var(--ink);
@@ -721,6 +721,52 @@ input[type="checkbox"]:focus-visible {
   color: inherit;
   text-decoration: underline;
 }
+.clipboard-prompt {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 12px 20px 0;
+  padding: 9px 10px 9px 12px;
+  border: 1px solid color-mix(in srgb, var(--info) 22%, transparent);
+  border-radius: 10px;
+  background: var(--info-soft);
+  animation: clipboard-prompt-in 0.22s ease-out;
+}
+.clipboard-prompt-icon {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  flex: none;
+  border-radius: 8px;
+  color: var(--info);
+  background: var(--surface);
+}
+.clipboard-prompt-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+.clipboard-prompt-text strong {
+  font-size: 13px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.clipboard-prompt-text small {
+  flex: none;
+  color: var(--muted);
+  font-size: 12px;
+}
+@keyframes clipboard-prompt-in {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+}
 .panel {
   background: var(--surface);
   border: 1px solid var(--border);
@@ -825,11 +871,13 @@ input[type="checkbox"]:focus-visible {
   letter-spacing: 0;
   color: var(--muted);
 }
+/* 面板高度跟随内容，最高占满剩余空间；内容超出时列表内部滚动，底栏留在底部。 */
 .workbench {
-  flex: 1;
+  flex: 0 1 auto;
   min-height: 0;
   display: grid;
   grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
   position: relative;
   background: var(--surface);
   border: 1px solid var(--border);
@@ -837,6 +885,8 @@ input[type="checkbox"]:focus-visible {
   overflow: hidden;
 }
 .workbench.has-inspector {
+  /* 详情面板需要完整高度；列表底栏仍紧跟最后一行。 */
+  flex: 1 1 auto;
   grid-template-columns: minmax(0, 1fr) 320px;
 }
 .task-list-pane {
@@ -874,7 +924,7 @@ input[type="checkbox"]:focus-visible {
 .tabs button.selected {
   color: var(--accent);
   background: var(--accent-soft);
-  font-weight: 550;
+  font-weight: 500;
 }
 .tabs button:hover {
   background: var(--surface-hover);
@@ -910,7 +960,7 @@ input[type="checkbox"]:focus-visible {
   flex: 1;
 }
 .task-list {
-  flex: 1;
+  flex: 0 1 auto;
   min-height: 0;
   overflow-y: auto;
 }
@@ -1314,8 +1364,9 @@ input[type="checkbox"]:focus-visible {
   flex-shrink: 0;
   margin-bottom: 18px;
 }
+/* 内容少时保存栏紧跟输入框；版本列表很长时内容区滚动，保存栏留在底部。 */
 .new-content {
-  flex: 1;
+  flex: 0 1 auto;
   min-height: 0;
   overflow: auto;
   padding: 0 2px 16px;
@@ -1346,23 +1397,6 @@ input[type="checkbox"]:focus-visible {
 }
 .source-error > svg {
   margin-top: 3px;
-}
-.source-start {
-  display: flex;
-  align-items: flex-start;
-  gap: 16px;
-  padding: 32px 0;
-  color: var(--muted);
-  max-width: 540px;
-}
-.source-start h2 {
-  font-size: 15px;
-  color: var(--ink);
-}
-.source-start p {
-  font-size: 14px;
-  line-height: 1.9;
-  margin-top: 8px;
 }
 .release-browser {
   background: var(--surface);
@@ -1645,26 +1679,9 @@ input[type="checkbox"]:focus-visible {
   text-decoration: underline;
   text-underline-offset: 3px;
 }
-.direct-explainer {
-  display: flex;
-  gap: 18px;
-  padding: 20px 0;
-  margin: 20px 0;
-  color: var(--muted);
-}
-.direct-explainer h2 {
-  font-size: 14px;
-  color: var(--ink);
-  margin-bottom: 8px;
-}
-.direct-explainer p {
-  font-size: 14px;
-  line-height: 1.9;
-  max-width: 480px;
-}
 .download-options {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 165px;
+  grid-template-columns: minmax(0, 1fr) 190px;
   gap: 16px;
 }
 .download-options select {
@@ -2643,7 +2660,7 @@ select {
 }
 .sw-tabs button.selected {
   color: var(--ink);
-  font-weight: 600;
+  font-weight: 500;
   border-bottom-color: var(--accent);
 }
 .sw-tabs small {
@@ -2657,8 +2674,12 @@ select {
 }
 .sw-workbench,
 .sw-page > .sw-workbench {
-  flex: 1 1 auto;
+  /* 与下载队列一致：高度跟随内容，打开详情时占满。 */
+  flex: 0 1 auto;
   min-height: 0;
+}
+.sw-page > .sw-workbench.has-inspector {
+  flex: 1 1 auto;
 }
 .sw-feed {
   flex: 1 1 auto;
@@ -3027,6 +3048,31 @@ dd.sw-file-issue {
 .task-row-note.is-warning {
   color: var(--warning);
 }
+.note-warning {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 10px;
+  color: var(--warning);
+  vertical-align: -1px;
+}
+.note-warning svg {
+  flex: none;
+}
+/* 已完成是常态，图标用中性色；文件缺失时淡化，状态交给文字说明。 */
+.task-row.is-done .file-icon.file-completed {
+  color: var(--muted);
+  background: var(--surface-muted);
+  border: 1px solid var(--border);
+}
+.task-row.is-done .file-icon.is-missing {
+  opacity: 0.6;
+  border-style: dashed;
+}
+/* 「打开文件夹」「重新下载」等宽，右侧按钮列对齐。 */
+.task-row.is-done .task-row-actions > .button-small {
+  min-width: calc(5em + 42px);
+}
 .task-row.is-done {
   min-height: 72px;
 }
@@ -3060,7 +3106,7 @@ dd.sw-file-issue {
   color: var(--ink);
   background: var(--surface);
   box-shadow: 0 1px 2px #00000014;
-  font-weight: 550;
+  font-weight: 500;
 }
 .list-pages {
   display: flex;
@@ -3111,6 +3157,29 @@ dd.sw-file-issue {
 }
 .source-input .input-row {
   align-items: flex-start;
+}
+/* 「显示预发布版本」与「读取版本」并排，和输入框第一行等高对齐。 */
+.source-input .prerelease-toggle {
+  flex: none;
+  height: 42px;
+  margin: 0 4px 0 6px;
+  white-space: nowrap;
+  color: var(--muted);
+  cursor: pointer;
+}
+.source-input .prerelease-toggle:has(input:checked) {
+  color: var(--ink);
+}
+@media (max-width: 760px) {
+  .source-input .input-row {
+    flex-wrap: wrap;
+  }
+  .source-input .input-row > .input {
+    flex: 1 1 100%;
+  }
+  .source-input .prerelease-toggle {
+    margin: 0 auto 0 2px;
+  }
 }
 .source-hint {
   display: flex;
@@ -3452,13 +3521,6 @@ dd.sw-file-issue {
 }
 .source-input {
   margin-bottom: 12px;
-}
-.source-start {
-  padding: 12px 0;
-}
-.direct-explainer {
-  margin: 6px 0;
-  padding: 8px 0;
 }
 .release-browser {
   margin-top: 12px;
@@ -4215,7 +4277,7 @@ select {
   color: var(--accent);
   background: var(--accent-soft);
   border-color: transparent;
-  font-weight: 550;
+  font-weight: 500;
 }
 .limit-field {
   display: flex;
@@ -4289,4 +4351,38 @@ select {
   text-align: center;
   transform: translateY(calc(var(--digit) * -1.25em));
   transition: transform var(--dur-slow) cubic-bezier(0.34, 1.3, 0.64, 1);
+}
+
+/* 悬浮提示：样式跟随主题，减少动效时直接出现。 */
+.tooltip {
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: 200;
+  max-width: 260px;
+  padding: 5px 9px;
+  border-radius: 6px;
+  background: var(--ink);
+  color: var(--surface);
+  font-size: 12px;
+  line-height: 1.4;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
+  box-shadow: 0 4px 14px #0002;
+  opacity: 0;
+}
+.tooltip[data-ready="true"] {
+  animation: tooltip-in 0.12s ease-out forwards;
+}
+@keyframes tooltip-in {
+  from {
+    opacity: 0;
+    transform: translateY(-2px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
 }

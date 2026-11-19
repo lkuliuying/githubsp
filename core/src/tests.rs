@@ -198,6 +198,7 @@ fn elapsed_time_recovery_marks_only_interrupted_execution_and_defaults_settings(
     let old: crate::model::Settings =
         serde_json::from_str(r#"{"limitKib":512,"closeToTray":true}"#).unwrap();
     assert!(old.background_completion_notice);
+    assert!(old.clipboard_detect, "旧设置默认开启剪贴板识别");
     let disabled: crate::model::Settings =
         serde_json::from_str(r#"{"backgroundCompletionNotice":false}"#).unwrap();
     assert!(!disabled.background_completion_notice);

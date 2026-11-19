@@ -5,6 +5,8 @@ import {
   ArrowDown,
   ArrowUp,
   Copy,
+  File,
+  FileX,
   Link as LinkIcon,
   ChevronRight,
   FolderOpen,
@@ -14,6 +16,7 @@ import {
   RotateCcw,
   Search,
   Trash2,
+  TriangleAlert,
   X,
   Zap,
 } from "lucide-react";
@@ -490,75 +493,88 @@ export function Queue() {
           <div className="task-list">
             {filter === "done" ? (
               doneTasks.length ? (
-                doneTasks.map(({ task, fileState }) => (
-                  <article
-                    className={`task-row is-done ${selected?.id === task.id ? "is-selected" : ""}`}
-                    key={task.id}
-                  >
-                    <div className={`file-icon file-${task.status}`}>
-                      <ArrowDownToLine size={19} />
-                    </div>
-                    <div className="task-row-main">
-                      <div className="task-row-heading">
-                        {nameButton(task)}
-                        {origin(task, task.completedAt || task.createdAt)}
-                      </div>
+                doneTasks.map(({ task, fileState }) => {
+                  const completed = task.status === "completed";
+                  const missing = completed && fileState !== "present";
+                  return (
+                    <article
+                      className={`task-row is-done ${selected?.id === task.id ? "is-selected" : ""}`}
+                      key={task.id}
+                    >
                       <div
-                        className={`task-row-note ${fileState !== "present" && task.status === "completed" ? "is-warning" : ""}`}
+                        className={`file-icon file-${task.status} ${missing ? "is-missing" : ""}`}
                       >
-                        {bytes(task.total ?? task.downloaded)}
-                        {task.status === "completed" &&
-                          fileState !== "present" &&
-                          ` · ${fileStateLabels[fileState] ?? "位置未确认"}`}
+                        {missing ? (
+                          <FileX size={19} />
+                        ) : completed ? (
+                          <File size={19} />
+                        ) : (
+                          <ArrowDownToLine size={19} />
+                        )}
                       </div>
-                    </div>
-                    <div className="task-row-actions">
-                      {task.status === "completed" && fileState === "present" ? (
-                        <Button
-                          size="sm"
+                      <div className="task-row-main">
+                        <div className="task-row-heading">
+                          {nameButton(task)}
+                          {origin(task, task.completedAt || task.createdAt)}
+                        </div>
+                        <div className="task-row-note">
+                          {bytes(task.total ?? task.downloaded)}
+                          {missing && (
+                            <span className="note-warning">
+                              <TriangleAlert size={12} />
+                              {fileStateLabels[fileState] ?? "位置未确认"}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      <div className="task-row-actions">
+                        {completed && !missing ? (
+                          <Button
+                            size="sm"
+                            disabled={busy}
+                            onClick={() => openFolder(task)}
+                          >
+                            <FolderOpen size={14} />
+                            打开文件夹
+                          </Button>
+                        ) : (
+                          <Button
+                            size="sm"
+                            disabled={busy || !connected}
+                            onClick={() => redownload(task)}
+                          >
+                            <RotateCcw size={14} />
+                            重新下载
+                          </Button>
+                        )}
+                        <Menu
+                          label={`${task.filename} 的更多操作`}
                           disabled={busy}
-                          onClick={() => openFolder(task)}
-                        >
-                          <FolderOpen size={14} />
-                          打开文件夹
-                        </Button>
-                      ) : (
-                        <Button
-                          size="sm"
-                          disabled={busy || !connected}
-                          onClick={() => redownload(task)}
-                        >
-                          <RotateCcw size={14} />
-                          重新下载
-                        </Button>
-                      )}
-                      <Menu
-                        label={`${task.filename} 的更多操作`}
-                        disabled={busy}
-                        items={[
-                          task.status === "completed" &&
-                            fileState === "present" && {
-                              label: "重新下载",
-                              icon: <RotateCcw size={14} />,
-                              onSelect: () => redownload(task),
+                          items={[
+                            task.status === "completed" &&
+                              fileState === "present" && {
+                                label: "重新下载",
+                                icon: <RotateCcw size={14} />,
+                                onSelect: () => redownload(task),
+                              },
+                            {
+                              label: "复制下载链接",
+                              icon: <Copy size={14} />,
+                              onSelect: () =>
+                                run(() => request("copy", { text: task.url })),
                             },
-                          {
-                            label: "复制下载链接",
-                            icon: <Copy size={14} />,
-                            onSelect: () =>
-                              run(() => request("copy", { text: task.url })),
-                          },
-                          {
-                            label: "移除记录",
-                            icon: <Trash2 size={14} />,
-                            danger: true,
-                            onSelect: () => act(task, "remove"),
-                          },
-                        ]}
-                      />
-                    </div>
-                  </article>
-                ))
+                            {
+                              label: "移除记录",
+                              icon: <Trash2 size={14} />,
+                              danger: true,
+                              onSelect: () => act(task, "remove"),
+                            },
+                          ]}
+                        />
+                      </div>
+                    </article>
+                  );
+                })
               ) : (
                 !loading && (
                   <Empty

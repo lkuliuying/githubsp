@@ -4,7 +4,7 @@ use githubsp_lib::{
     intake,
     manager::Action,
     model::{Settings, Snapshot, TaskStatus, WatchRule},
-    preflight, relocation, updates,
+    paste, preflight, relocation, updates,
 };
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -160,6 +160,13 @@ pub enum Request {
     },
     Copy {
         text: String,
+    },
+    /// 识别剪贴板里的 GitHub 链接。`known` 是界面已处理过的剪贴板序号；
+    /// `manual` 表示用户主动按下 Ctrl+V，此时不受设置开关和去重限制。
+    Clipboard {
+        known: Option<u32>,
+        #[serde(default)]
+        manual: bool,
     },
     Diagnostics,
     ExportBackup,
@@ -642,6 +649,28 @@ pub async fn dispatch(
                 return Err("复制内容过长".into());
             }
             return system_actions::copy(&text, std::ptr::null_mut()).map(|_| Value::Null);
+        }
+        Request::Clipboard { known, manual } => {
+            let sequence = system_actions::clipboard_sequence();
+            if !manual {
+                let enabled = service
+                    .state
+                    .borrow()
+                    .as_ref()
+                    .is_none_or(|s| s.settings.clipboard_detect);
+                if !enabled || known == Some(sequence) || system_actions::clipboard_is_own(sequence)
+                {
+                    return value(json!({ "sequence": sequence, "suggestion": null }));
+                }
+            }
+            let limit = if manual { 1_048_576 } else { paste::AUTO_LIMIT };
+            // 原始文字只在这里识别，界面只拿到识别结果。
+            let suggestion = tauri::async_runtime::spawn_blocking(move || {
+                system_actions::read_text(limit).and_then(|text| paste::recognize(&text))
+            })
+            .await
+            .map_err(|e| e.to_string())?;
+            return value(json!({ "sequence": sequence, "suggestion": suggestion }));
         }
         Request::Diagnostics => {
             let snapshot = manager.snapshot().await.map_err(|e| e.to_string())?;

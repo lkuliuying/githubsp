@@ -70,6 +70,8 @@ export interface Settings {
   logEnabled: boolean;
   reduceMotion: boolean;
   autoMatchPlatform: boolean;
+  /** 窗口激活时识别剪贴板里的 GitHub 链接；旧数据缺省视为开启。 */
+  clipboardDetect?: boolean;
   network?: NetworkSettings;
   agent?: { enabled: boolean; allowedDirectories: string[] };
   /** 每个下载任务的同时连接数，1–8。 */

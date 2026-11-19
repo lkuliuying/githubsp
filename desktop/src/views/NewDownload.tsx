@@ -39,6 +39,8 @@ const draft = {
   route: "",
   autoload: false,
 };
+/** 新建下载输入框里当前的内容，剪贴板提示据此跳过已经填过的链接。 */
+export const draftSource = () => draft.source.trim();
 /** 打开新建下载并填入地址；仓库地址默认直接读取版本。 */
 export function openRepository(repository: string, autoload = true) {
   draft.source = repository.startsWith("https://")
@@ -100,6 +102,7 @@ export function NewDownload() {
     draft.source = value;
     setSource(value);
     epoch.current++;
+    browseEpoch.current++;
     setCatalog(null);
     setBrowseError(null);
     setSelected([]);
@@ -124,6 +127,8 @@ export function NewDownload() {
   const [preview, setPreview] = useState<BatchPreview | null>(null);
   const [results, setResults] = useState<BatchItem[] | null>(null);
   const epoch = useRef(0);
+  // 读取版本单独计数：切换附件选择会让 epoch 增加，但不应作废正在进行的读取。
+  const browseEpoch = useRef(0);
   const { busy, run, active } = useJob();
   const confirm = useConfirm();
   useEffect(() => {
@@ -135,6 +140,7 @@ export function NewDownload() {
       setBrowseError(null);
       setPreview(null);
       epoch.current++;
+      browseEpoch.current++;
     };
     window.addEventListener("githubsp:repository", open);
     return () => window.removeEventListener("githubsp:repository", open);
@@ -183,18 +189,19 @@ export function NewDownload() {
     setDirectory(value);
     epoch.current++;
   };
-  const load = (more = false) =>
+  const load = (more = false, prerelease = includePrerelease) =>
     run(async () => {
-      const revision = ++epoch.current;
+      const revision = ++browseEpoch.current;
+      epoch.current++;
       setBrowsing(true);
       setBrowseError(null);
       try {
         const next = await request<CatalogPage>("browse", {
           input: repository.trim(),
           page: more ? (catalog?.page ?? 0) + 1 : 1,
-          includePrerelease,
+          includePrerelease: prerelease,
         });
-        if (!active.current || revision !== epoch.current) return;
+        if (!active.current || revision !== browseEpoch.current) return;
         setCatalog(
           more && catalog
             ? {
@@ -215,7 +222,7 @@ export function NewDownload() {
           setSelected([]);
         }
       } catch (error) {
-        if (active.current && revision === epoch.current)
+        if (active.current && revision === browseEpoch.current)
           setBrowseError(
             error instanceof Error ? error.message : String(error),
           );
@@ -327,6 +334,27 @@ export function NewDownload() {
               }}
             />
             {detected.kind !== "links" && (
+              <label className="checkbox-line prerelease-toggle">
+                <input
+                  type="checkbox"
+                  checked={includePrerelease}
+                  disabled={busy}
+                  onChange={(e) => {
+                    const next = e.target.checked;
+                    setPrerelease(next);
+                    // 已读取过版本时自动按新选项重读；还没读取时只记住选项。
+                    if (
+                      (catalog || browseError) &&
+                      detected.kind === "repository" &&
+                      connected
+                    )
+                      load(false, next);
+                  }}
+                />
+                显示预发布版本
+              </label>
+            )}
+            {detected.kind !== "links" && (
               <Button
                 variant="default"
                 disabled={
@@ -348,7 +376,7 @@ export function NewDownload() {
               <Link size={13} />
               识别到 {detected.lines.length} 个附件链接
               {detected.lines.length > 100 && "，每次最多 100 个"}
-              ，选好保存位置后点「预览并确认」。
+              。预览时会列出文件大小并提醒重复下载。
             </p>
           )}
           {detected.kind === "mixed" && (
@@ -357,23 +385,7 @@ export function NewDownload() {
               多行时每行都要是附件链接；仓库地址请单独粘贴。
             </p>
           )}
-          {mode === "repository" && (
-            <label className="checkbox-line">
-              <input
-                type="checkbox"
-                checked={includePrerelease}
-                disabled={busy}
-                onChange={(e) => {
-                  setPrerelease(e.target.checked);
-                  setCatalog(null);
-                  setBrowseError(null);
-                  setSelected([]);
-                  epoch.current++;
-                }}
-              />
-              显示预发布版本<span>更改后重新读取</span>
-            </label>
-          )}
+
           {browseError && (
             <div className="source-error" role="alert">
               <AlertCircle size={16} />
@@ -593,28 +605,8 @@ export function NewDownload() {
                 ))}
               </div>
             </div>
-          ) : (
-            <div className="source-start">
-              <GitBranch size={24} strokeWidth={1.5} />
-              <div>
-                <h2>从一个 GitHub 项目开始</h2>
-                <p>
-                  粘贴项目地址并读取版本，就可以挑选要下载的附件。也可以直接粘贴附件链接。
-                </p>
-              </div>
-            </div>
-          )
-        ) : (
-          <div className="direct-explainer">
-            <Link size={24} />
-            <div>
-              <h2>直接下载这些附件</h2>
-              <p>
-                下一步会列出每个文件的大小，并提醒重复的下载。确认后按顺序加入下载队列。
-              </p>
-            </div>
-          </div>
-        )}
+          ) : null
+        ) : null}
       </div>
       <footer className="new-footer">
         <div className="download-options">

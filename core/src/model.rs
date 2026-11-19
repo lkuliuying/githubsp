@@ -309,6 +309,8 @@ pub struct Settings {
     pub reduce_motion: bool,
     /// 打开版本页时按当前平台自动勾选附件。
     pub auto_match_platform: bool,
+    /// 窗口激活时识别剪贴板里的 GitHub 链接并提示下载。
+    pub clipboard_detect: bool,
     /// 网络配置在应用重启后生效，不改变正在进行的传输。
     pub network: crate::network_settings::NetworkSettings,
     pub agent: AgentSettings,
@@ -339,6 +341,7 @@ impl Default for Settings {
             log_enabled: true,
             reduce_motion: false,
             auto_match_platform: true,
+            clipboard_detect: true,
             network: Default::default(),
             agent: Default::default(),
             connections: crate::engine::DEFAULT_CONNECTIONS,

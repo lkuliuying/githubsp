@@ -21,6 +21,8 @@ import {
   useWorkspace,
 } from "./lib/api";
 import { Navigation } from "./components/Navigation";
+import { ClipboardPrompt } from "./components/ClipboardPrompt";
+import { TooltipHost } from "./components/Tooltip";
 import { setThemeMode, useAppearance } from "./lib/appearance";
 import { PageHost } from "./components/PageHost";
 import { Button } from "./components/ui/button";
@@ -50,6 +52,24 @@ export function App() {
     return () => media.removeEventListener("change", changed);
   }, []);
   useEffect(() => showNotices(false), [view]);
+  const [maximized, setMaximized] = useState(false);
+  useEffect(() => {
+    if (!isTauri()) return;
+    const window = getCurrentWindow();
+    const sync = () =>
+      void window.isMaximized().then(setMaximized, () => undefined);
+    sync();
+    let disposed = false;
+    let unlisten: (() => void) | undefined;
+    void window.onResized(sync).then((fn) => {
+      if (disposed) fn();
+      else unlisten = fn;
+    });
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, []);
   const [connectionAttempt, setConnectionAttempt] = useState(0);
   const confirm = useConfirm();
   const { run } = useJob();
@@ -112,7 +132,7 @@ export function App() {
             <Button
               variant="ghost"
               size="icon"
-              aria-label="查看通知"
+              aria-label="通知"
               onClick={() => showNotices(!notices)}
             >
               <Bell size={15} />
@@ -132,7 +152,7 @@ export function App() {
                 <Button
                   variant="ghost"
                   size="icon"
-                  aria-label="最大化或还原"
+                  aria-label={maximized ? "还原" : "最大化"}
                   onClick={() => run(() => getCurrentWindow().toggleMaximize())}
                 >
                   <Square size={12} />
@@ -141,7 +161,9 @@ export function App() {
                   variant="ghost"
                   size="icon"
                   className="window-close"
-                  aria-label="关闭主窗口"
+                  aria-label={
+                    snapshot?.settings.closeToTray ? "关闭到托盘" : "退出"
+                  }
                   onClick={() =>
                     run(async () => {
                       if (
@@ -175,12 +197,16 @@ export function App() {
             </button>
           </div>
         )}
+        <ClipboardPrompt
+          enabled={!!snapshot && snapshot.settings.clipboardDetect !== false}
+        />
         {!snapshot && isTauri() && !error ? (
           <Busy text="正在连接…" />
         ) : (
           <PageHost view={view} pages={pages} />
         )}
       </main>
+      <TooltipHost />
       {message && (
         <div
           className={`toast toast-${message.kind}`}
