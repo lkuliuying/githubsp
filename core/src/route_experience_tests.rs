@@ -465,11 +465,17 @@ async fn multiple_waiting_tasks_are_bounded_and_both_remain_cancellable() {
     let root = tempfile::tempdir().unwrap();
     let second = root.path().join("second");
     std::fs::create_dir(&second).unwrap();
+    // 第一个任务要等第二个任务也进入等待后才能失败。400 毫秒的额度在较慢的 CI 上
+    // 可能先用完，两个任务就永远不会同时等待，这里给足 3 秒，仍要求两者最终都失败。
+    let policy = RoutePolicy {
+        recovery_budget: Duration::from_secs(3),
+        ..fast_policy()
+    };
     let manager = Manager::start_with_policy(
         &root.path().join("tasks.sqlite3"),
         fixture.engine(),
         Arc::new(|_| {}),
-        fast_policy(),
+        policy,
     )
     .unwrap();
     manager
