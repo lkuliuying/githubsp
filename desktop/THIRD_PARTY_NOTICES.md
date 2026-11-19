@@ -5,7 +5,8 @@
 - cc-switch：https://github.com/farion1231/cc-switch，commit `506f3cf836da730fba59af25b9f87873a92a6c48`。`src/components/ui/button.tsx`、`input.tsx`、`dialog.tsx` 改编为本项目基础控件；样式与业务绑定已替换。
 - Motrix：https://github.com/agalwood/Motrix，commit `a45a729e985446a936167106af6b4173f06116aa`。`src/renderer/routes/downloads/task-progress.tsx` 改编为本项目进度组件，下载工作台的列表与详情分区作为布局参考；没有引入其 Electron 或下载核心。
 
-- magpie：https://github.com/yetone/magpie，commit `75d40ba48bcc4b215de044c78ce226ed47f4f510`。`internal/gui/assets/index.html`、`app.css` 的侧栏、标题栏、控件表面、页面淡入和宽屏限宽适配为 React 页面，设置页的分类标签、跨分类搜索、行式偏好列表和分段开关适配为 `Settings.tsx`；`app.js` 的 `navTopGo` / `navTopStep` 弹簧逻辑适配为 `Navigation.tsx`。只复用界面与动画实现，没有引入 Wails、Go 或网关业务。
+- magpie：https://github.com/yetone/magpie，commit `75d40ba48bcc4b215de044c78ce226ed47f4f510`。`internal/gui/assets/index.html`、`app.css` 的侧栏、标题栏、控件表面、页面淡入和宽屏限宽适配为 React 页面，设置页的分类标签、跨分类搜索、行式偏好列表和分段开关适配为 `Settings.tsx`；`app.js` 的 `navTopGo` / `navTopStep` 弹簧逻辑适配为 `src/lib/useSpringThumb.ts`，供侧边栏和页内标签共用。只复用界面与动画实现，没有引入 Wails、Go 或网关业务。
+- cult-ui：https://github.com/nolly-studio/cult-ui，commit `d71b1428b811c2779d46ea41b7ef8c9f9c9991c2`。参考 `apps/www/registry/default/ui/` 下的 `direction-aware-tabs.tsx` / `halo-segmented.tsx`（选中底色在标签间滑动）、`halo-progress.tsx`（scaleX 绘制进度、渐变滑条表示不确定进度）、`copy-button.tsx`（复制后图标换成对勾再复原）、`sortable-list.tsx`（拖动时其他行让位）、`popover-form.tsx`（轻量弹出表单与成功态）和 `rolling-number.tsx`（数字滚动到新值），用项目自己的 CSS 变量、指针事件和弹簧逻辑重写；没有引入 motion、Base UI 或其视觉风格。
 
 ## cc-switch
 
@@ -68,3 +69,15 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+## cult-ui
+
+MIT License
+
+Copyright (c) 2023 Jordan-Gilliam
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.

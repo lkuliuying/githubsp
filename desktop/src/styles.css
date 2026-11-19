@@ -1026,17 +1026,21 @@ input[type="checkbox"]:focus-visible {
   pointer-events: auto;
 }
 .progress-track {
+  position: relative;
   height: 3px;
   border-radius: 2px;
   background: var(--surface-hover);
   overflow: hidden;
 }
+/* 进度用 scaleX 绘制，只触发合成，不触发重排（参考 cult-ui halo-progress）。 */
 .progress-track > span {
   display: block;
+  width: 100%;
   height: 100%;
   background: var(--progress);
-  transition: width 0.23s linear;
-  max-width: 100%;
+  transform: scaleX(var(--progress-scale, 0));
+  transform-origin: left center;
+  transition: transform 0.23s linear;
 }
 .tone-paused .progress-track > span {
   background: var(--control-off);
@@ -1058,8 +1062,29 @@ input[type="checkbox"]:focus-visible {
   font-variant-numeric: tabular-nums;
 }
 .progress-track[data-indeterminate="true"] > span {
-  width: 28% !important;
-  animation: progress-scan 1.6s ease-in-out infinite;
+  width: 36%;
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--progress) 25%, transparent),
+    var(--progress),
+    color-mix(in srgb, var(--progress) 25%, transparent)
+  );
+  animation: progress-scan 1.3s ease-in-out infinite;
+}
+/* 进度数字暂时不动但仍在处理（检测线路、等待网络、重试、校验）：已下载部分保留，上面扫过一道光带。 */
+.progress-track[data-busy="true"]::after {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 36%;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    color-mix(in srgb, var(--progress) 70%, transparent),
+    transparent
+  );
+  animation: progress-scan 1.3s ease-in-out infinite;
+  pointer-events: none;
 }
 @keyframes progress-scan {
   from {
@@ -2383,6 +2408,9 @@ input[type="checkbox"]:focus-visible {
   .progress-track[data-indeterminate="true"] > span {
     animation: none !important;
   }
+  .progress-track[data-busy="true"]::after {
+    display: none;
+  }
   *,
   *:before,
   *:after {
@@ -2400,6 +2428,9 @@ input[type="checkbox"]:focus-visible {
 }
 .reduce-motion .progress-track[data-indeterminate="true"] > span {
   animation: none !important;
+}
+.reduce-motion .progress-track[data-busy="true"]::after {
+  display: none;
 }
 
 /* magpie 的中性表面、列表密度与单列设置，业务状态色独立。 */
@@ -3950,4 +3981,312 @@ select {
     opacity: 1;
     transform: translateX(-50%);
   }
+}
+
+/* ===== 界面升级第一批：选中底色滑动、复制反馈（参考 cult-ui direction-aware-tabs / copy-button，MIT） ===== */
+.tabs,
+.segmented,
+.sw-tabs {
+  position: relative;
+}
+.tab-thumb {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 0;
+  z-index: 0;
+  opacity: 0;
+  pointer-events: none;
+  will-change: transform;
+}
+.tabs > button,
+.segmented > button,
+.sw-tabs > button {
+  position: relative;
+  z-index: 1;
+}
+/* 有滑块时，选中项自身不再画底色，改由滑块承担。 */
+.tabs > .tab-thumb {
+  border-radius: 5px;
+  background: var(--accent-soft);
+}
+.tabs > .tab-thumb ~ button.selected:not(:hover) {
+  background: transparent;
+}
+.segmented > .tab-thumb {
+  top: 2px;
+  bottom: 2px;
+  border-radius: 5px;
+  background: var(--surface);
+  box-shadow: 0 1px 2px #00000014;
+}
+.segmented > .tab-thumb ~ button.selected {
+  background: transparent;
+  box-shadow: none;
+}
+.sw-tabs > .tab-thumb {
+  top: auto;
+  bottom: -1px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--accent);
+}
+.sw-tabs > .tab-thumb ~ button.selected {
+  border-bottom-color: transparent;
+}
+
+.copy-icon {
+  display: inline-grid;
+  flex: none;
+}
+.copy-icon > svg {
+  grid-area: 1 / 1;
+  transition:
+    opacity var(--dur-base) var(--ease-out),
+    transform var(--dur-base) var(--ease-out);
+}
+.copy-icon > svg:last-child,
+.copy-button.is-copied .copy-icon > svg:first-child {
+  opacity: 0;
+  transform: scale(0.5);
+}
+.copy-button.is-copied .copy-icon > svg:last-child {
+  opacity: 1;
+  transform: none;
+  color: var(--success);
+}
+.copy-label {
+  display: inline-grid;
+}
+.copy-label > span {
+  grid-area: 1 / 1;
+  transition: opacity var(--dur-fast) var(--ease-out);
+}
+.copy-label > span[aria-hidden="true"] {
+  opacity: 0;
+}
+.detail-copyable {
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+}
+.detail-copyable > span {
+  min-width: 0;
+  flex: 1;
+}
+.button.copy-inline {
+  width: 24px;
+  min-height: 24px;
+  height: 24px;
+  margin-top: -1px;
+  color: var(--muted);
+}
+.button.copy-inline:hover:not(:disabled) {
+  color: var(--ink);
+}
+
+/* ===== 界面升级第二批：拖动排序、限速弹窗、滚动数字（参考 cult-ui sortable-list / popover-form / rolling-number，MIT） ===== */
+.task-row[data-sortable] {
+  transition:
+    background-color var(--dur-fast) var(--ease-out),
+    transform var(--dur-base) var(--ease-out),
+    box-shadow var(--dur-base) var(--ease-out);
+}
+.task-row.is-dragging {
+  z-index: 3;
+  transition: box-shadow var(--dur-base) var(--ease-out);
+  background: var(--surface);
+  border-radius: 8px;
+  box-shadow:
+    0 10px 28px #0000001f,
+    0 0 0 1px var(--border);
+  cursor: grabbing;
+}
+.dark .task-row.is-dragging {
+  box-shadow:
+    0 10px 28px #00000066,
+    0 0 0 1px var(--border);
+}
+.drag-handle {
+  /* 盖在整行可点的名称按钮（::after 铺满整行）之上，否则按不到把手。 */
+  position: relative;
+  z-index: 1;
+  display: grid !important;
+  place-items: center;
+  cursor: grab;
+  touch-action: none;
+  color: inherit;
+}
+.task-row.is-dragging .drag-handle {
+  cursor: grabbing;
+}
+.drag-handle > svg {
+  grid-area: 1 / 1;
+  transition: opacity var(--dur-fast) var(--ease-out);
+}
+.drag-handle > svg:last-child,
+.task-row:hover .drag-handle:not(:disabled) > svg:first-child,
+.drag-handle:focus-visible > svg:first-child,
+.task-row.is-dragging .drag-handle > svg:first-child {
+  opacity: 0;
+}
+.task-row:hover .drag-handle:not(:disabled) > svg:last-child,
+.drag-handle:focus-visible > svg:last-child,
+.task-row.is-dragging .drag-handle > svg:last-child {
+  opacity: 1;
+}
+.drag-handle:focus-visible {
+  outline: 2px solid var(--link);
+  outline-offset: 1px;
+}
+
+.limit-popover {
+  position: relative;
+}
+.header-limit {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 7px;
+  margin: -3px -7px;
+  border-radius: 6px;
+  color: var(--muted);
+  white-space: nowrap;
+  transition: background-color var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out);
+}
+.header-limit.is-limited {
+  color: var(--warning);
+}
+.header-limit:hover:not(:disabled),
+.header-limit[aria-expanded="true"] {
+  background: var(--surface-hover);
+  color: var(--ink);
+}
+.limit-panel {
+  position: absolute;
+  right: -8px;
+  top: calc(100% + 10px);
+  z-index: 40;
+  width: 336px;
+  padding: 14px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: var(--shadow);
+  color: var(--ink);
+  white-space: normal;
+  transform-origin: top right;
+  animation: menu-in 160ms var(--ease-out);
+}
+.limit-panel form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  transition: opacity var(--dur-base) var(--ease-out),
+    filter var(--dur-base) var(--ease-out);
+}
+.limit-panel label {
+  font-size: 13px;
+  font-weight: 600;
+}
+.limit-presets {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 6px;
+}
+.limit-presets button {
+  padding: 4px 0;
+  white-space: nowrap;
+  border-radius: 6px;
+  font-size: 13px;
+  color: var(--muted);
+  background: var(--surface-muted);
+  border: 1px solid var(--border);
+  transition: background-color var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out);
+}
+.limit-presets button:hover:not(:disabled) {
+  color: var(--ink);
+  background: var(--surface-hover);
+}
+.limit-presets button.selected {
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-color: transparent;
+  font-weight: 550;
+}
+.limit-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.limit-field .input {
+  flex: 1;
+  height: 32px;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+.limit-field .input[aria-invalid="true"] {
+  border-color: var(--danger);
+}
+.limit-unit {
+  font-size: 13px;
+  color: var(--muted);
+}
+.limit-hint,
+.limit-error {
+  margin: 0;
+  white-space: normal;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+.limit-error {
+  color: var(--danger);
+}
+/* 应用成功：表单淡出，中间浮出对勾（参考 popover-form 的成功态）。 */
+.limit-success {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--success);
+  pointer-events: none;
+}
+.limit-success:empty {
+  display: none;
+}
+.limit-success svg {
+  animation: dialog-in var(--dur-base) var(--ease-out);
+}
+.limit-panel.is-done form {
+  opacity: 0.08;
+  filter: blur(1px);
+}
+
+/* 滚动数字：每位一个 0–9 竖条，按 --digit 移到目标位置。 */
+.rolling-number {
+  position: relative;
+  display: inline-flex;
+}
+.rolling-digits {
+  display: inline-flex;
+  height: 1.25em;
+  line-height: 1.25em;
+  overflow: hidden;
+  font-variant-numeric: tabular-nums;
+}
+.rolling-digit::before {
+  content: "0\A 1\A 2\A 3\A 4\A 5\A 6\A 7\A 8\A 9";
+  display: block;
+  white-space: pre;
+  text-align: center;
+  transform: translateY(calc(var(--digit) * -1.25em));
+  transition: transform var(--dur-slow) cubic-bezier(0.34, 1.3, 0.64, 1);
 }

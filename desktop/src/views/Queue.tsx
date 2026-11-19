@@ -8,6 +8,7 @@ import {
   Link as LinkIcon,
   ChevronRight,
   FolderOpen,
+  GripVertical,
   Pause,
   Play,
   RotateCcw,
@@ -22,7 +23,6 @@ import {
   date,
   duration,
   fileStateLabels,
-  formatLimit,
   relativeTime,
   running,
   statusLabels,
@@ -39,6 +39,11 @@ import { detectSource } from "@/lib/source";
 import { openRepository } from "./NewDownload";
 import { Empty, ErrorBox, useConfirm, useJob } from "@/components/common";
 import { TaskProgress } from "@/components/TaskProgress";
+import { CopyButton } from "@/components/CopyButton";
+import { useSpringThumb } from "@/lib/useSpringThumb";
+import { useDragSort } from "@/lib/useDragSort";
+import { SpeedLimitPopover } from "@/components/SpeedLimitPopover";
+import { RollingNumber } from "@/components/RollingNumber";
 
 type Filter = "unfinished" | "active" | "paused" | "failed" | "done";
 const resumable = (task: Task) =>
@@ -76,6 +81,8 @@ export function Queue() {
   const [doneStatus, setDoneStatus] = useState<"completed" | "cancelled">(
     "completed",
   );
+  const filterThumb = useSpringThumb(filter);
+  const doneThumb = useSpringThumb(doneStatus);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = usePageSize("queue");
   const [history, setHistory] = useState<HistoryPage | null>(null);
@@ -107,18 +114,44 @@ export function Queue() {
     };
   }, [filter, doneStatus, query, page, pageSize, revision, snapshot?.historyRevision, connected, visible]);
 
-  const tasks = useMemo(
-    () =>
-      [...(snapshot?.tasks ?? [])].sort(
-        (a, b) => b.createdAt - a.createdAt || b.id.localeCompare(a.id),
-      ),
-    [snapshot?.tasks],
-  );
-  const unfinished = tasks.filter(matches.unfinished);
+  // 拖动排序后先按新顺序显示，等后端推送新的队列版本再以快照为准；失败时撤回。
+  const [order, setOrder] = useState<string[] | null>(null);
+  useEffect(() => setOrder(null), [snapshot?.queueRevision]);
   // 后端的 queuePosition 是排序序号而非名次，这里换算成等待中的第几位。
-  const waiting = tasks
-    .filter((task) => task.status === "queued")
-    .sort((a, b) => (a.queuePosition ?? 0) - (b.queuePosition ?? 0));
+  const waiting = useMemo(() => {
+    const queued = (snapshot?.tasks ?? [])
+      .filter((task) => task.status === "queued")
+      .sort(
+        (a, b) =>
+          (a.queuePosition ?? 0) - (b.queuePosition ?? 0) ||
+          a.createdAt - b.createdAt ||
+          a.id.localeCompare(b.id),
+      );
+    if (!order) return queued;
+    const rank = new Map(order.map((id, index) => [id, index]));
+    return [...queued].sort(
+      (a, b) => (rank.get(a.id) ?? Infinity) - (rank.get(b.id) ?? Infinity),
+    );
+  }, [snapshot?.tasks, order]);
+  // 列表分三段：正在处理的在最上面，排队的按名次接在后面，暂停、失败等其余任务最后；
+  // 第一段和第三段按添加时间从新到旧。
+  const tasks = useMemo(() => {
+    const rank = new Map(waiting.map((task, index) => [task.id, index]));
+    const group = (task: Task) =>
+      task.status === "queued"
+        ? 1
+        : running(task.status) && task.status !== "waiting_network"
+          ? 0
+          : 2;
+    return [...(snapshot?.tasks ?? [])].sort(
+      (a, b) =>
+        group(a) - group(b) ||
+        (rank.get(a.id) ?? 0) - (rank.get(b.id) ?? 0) ||
+        b.createdAt - a.createdAt ||
+        b.id.localeCompare(a.id),
+    );
+  }, [snapshot?.tasks, waiting]);
+  const unfinished = tasks.filter(matches.unfinished);
   const queueRank = (task: Task) =>
     waiting.findIndex((item) => item.id === task.id) + 1 || "—";
   const counts = {
@@ -169,6 +202,31 @@ export function Queue() {
   // 未完成列表在前端分页；已完成列表由后端按页返回。
   const listPage = clampPage(page, visibleTasks.length, pageSize);
   const pagedTasks = visibleTasks.slice((listPage - 1) * pageSize, listPage * pageSize);
+  // 只有在不搜索时、本页至少两个排队任务才能拖动；排队任务在列表里是连续的一段。
+  const sortable = query
+    ? []
+    : pagedTasks.filter((task) => task.status === "queued").map((task) => task.id);
+  const moveTo = (id: string, target: number) => {
+    const ids = waiting.map((task) => task.id);
+    ids.splice(ids.indexOf(id), 1);
+    ids.splice(target, 0, id);
+    setOrder(ids);
+    void run(async () => {
+      try {
+        await request("reorder", { id, direction: "to", index: target });
+      } catch (error) {
+        setOrder(null);
+        throw error;
+      }
+    });
+  };
+  const drag = useDragSort({
+    ids: sortable,
+    disabled: !connected || busy || sortable.length < 2,
+    onMove: (id, to) => moveTo(id, waiting.findIndex((task) => task.id === sortable[to])),
+    onStep: (id, direction) =>
+      run(() => request("reorder", { id, direction })),
+  });
   const selected =
     visibleTasks.find((task) => task.id === selection) ??
     doneTasks.find((item) => item.task.id === selection)?.task;
@@ -263,7 +321,7 @@ export function Queue() {
             下载队列
             {counts.unfinished > 0 && (
               <span className="count-label" title="未完成的任务">
-                {counts.unfinished}
+                <RollingNumber value={counts.unfinished} />
               </span>
             )}
           </h1>
@@ -272,21 +330,23 @@ export function Queue() {
           <div className="header-stats" aria-label="下载概况">
             <span>
               <i className="live-dot" />
-              <strong>{tasks.filter((t) => running(t.status)).length}</strong>
+              <strong>
+                <RollingNumber value={tasks.filter((t) => running(t.status)).length} />
+              </strong>
               正在处理
             </span>
             <span>
-              <strong>{tasks.filter((t) => t.status === "queued").length}</strong>
+              <strong>
+                <RollingNumber value={tasks.filter((t) => t.status === "queued").length} />
+              </strong>
               等待中
             </span>
             <span className="header-speed">
               {bytes(tasks.reduce((sum, t) => sum + t.speed, 0))}/s
             </span>
-            {snapshot?.settings.limitKib ? (
-              <span title="可在设置 → 下载中修改">
-                限速 {formatLimit(snapshot.settings.limitKib)}
-              </span>
-            ) : null}
+            {snapshot && (
+              <SpeedLimitPopover settings={snapshot.settings} disabled={!connected} />
+            )}
           </div>
           <Button variant="default" onClick={() => navigate("new")}>
             <ArrowDownToLine size={16} />
@@ -300,7 +360,13 @@ export function Queue() {
       <div className={`workbench ${selected ? "has-inspector" : ""}`}>
         <div className="task-list-pane">
           <div className="list-toolbar">
-            <div className="tabs" role="tablist" aria-label="筛选下载任务">
+            <div
+              className="tabs"
+              role="tablist"
+              aria-label="筛选下载任务"
+              ref={filterThumb.root}
+            >
+              <span className="tab-thumb" ref={filterThumb.thumb} aria-hidden="true" />
               {tabs.map(([key, label]) => (
                 <button
                   role="tab"
@@ -314,7 +380,7 @@ export function Queue() {
                     <span
                       className={`tab-count ${key === "failed" ? "is-danger" : ""}`}
                     >
-                      {counts[key]}
+                      <RollingNumber value={counts[key]} />
                     </span>
                   )}
                 </button>
@@ -323,7 +389,13 @@ export function Queue() {
             <div className="list-tools">
             {filter === "done" ? (
               <>
-                <div className="segmented" role="group" aria-label="已完成类型">
+                <div
+                  className="segmented"
+                  role="group"
+                  aria-label="已完成类型"
+                  ref={doneThumb.root}
+                >
+                  <span className="tab-thumb" ref={doneThumb.thumb} aria-hidden="true" />
                   {(
                     [
                       ["completed", "下载完成"],
@@ -523,12 +595,28 @@ export function Queue() {
             ) : (
               pagedTasks.map((task) => (
                 <article
-                  className={`task-row ${selected?.id === task.id ? "is-selected" : ""} ${fresh.has(task.id) ? "is-new" : ""}`}
+                  className={`task-row ${selected?.id === task.id ? "is-selected" : ""} ${fresh.has(task.id) ? "is-new" : ""} ${drag.dragging === task.id ? "is-dragging" : ""}`}
                   key={task.id}
+                  ref={sortable.length > 1 && sortable.includes(task.id) ? drag.register(task.id) : undefined}
+                  data-sortable={(sortable.length > 1 && sortable.includes(task.id)) || undefined}
                 >
-                  <div className={`file-icon file-${task.status}`}>
-                    <ArrowDownToLine size={19} />
-                  </div>
+                  {sortable.length > 1 && sortable.includes(task.id) ? (
+                    <button
+                      type="button"
+                      className={`file-icon file-${task.status} drag-handle`}
+                      aria-label={`调整 ${task.filename} 的排队顺序：拖动，或按上下方向键`}
+                      title="拖动调整下载顺序"
+                      disabled={!connected || busy}
+                      {...drag.handle(task.id)}
+                    >
+                      <ArrowDownToLine size={19} />
+                      <GripVertical size={17} />
+                    </button>
+                  ) : (
+                    <div className={`file-icon file-${task.status}`}>
+                      <ArrowDownToLine size={19} />
+                    </div>
+                  )}
                   <div className="task-row-main">
                     <div className="task-row-heading">
                       {nameButton(task)}
@@ -818,7 +906,16 @@ function TaskInspector({
       )}
       <dl className="details">
         <dt>保存位置</dt>
-        <dd className="break-all">{selected.finalPath ?? selected.directory}</dd>
+        <dd className="detail-copyable">
+          <span className="break-all">{selected.finalPath ?? selected.directory}</span>
+          <CopyButton
+            text={selected.finalPath ?? selected.directory}
+            variant="ghost"
+            size="icon"
+            className="copy-inline"
+            aria-label="复制保存位置"
+          />
+        </dd>
         <dt>大小</dt>
         <dd>{bytes(selected.total ?? selected.downloaded)}</dd>
         <dt>添加时间</dt>
@@ -974,13 +1071,7 @@ function TaskInspector({
             重新下载
           </Button>
         ) : (
-          <Button
-            disabled={busy}
-            onClick={() => run(() => request("copy", { text: selected.url }))}
-          >
-            <Copy size={14} />
-            复制链接
-          </Button>
+          <CopyButton disabled={busy} text={selected.url} label="复制链接" />
         )}
         <Button
           variant="ghost"

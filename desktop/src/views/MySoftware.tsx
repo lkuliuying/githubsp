@@ -4,7 +4,6 @@ import {
   ArrowRight,
   BellPlus,
   CheckCheck,
-  Copy,
   EyeOff,
   ExternalLink,
   FolderOpen,
@@ -24,6 +23,9 @@ import { Menu } from "@/components/Menu";
 import { Pager, clampPage, usePageSize } from "@/components/Pager";
 import { Empty, ErrorBox, Toggle, useConfirm, useJob } from "@/components/common";
 import { Button } from "@/components/ui/button";
+import { CopyButton } from "@/components/CopyButton";
+import { useSpringThumb } from "@/lib/useSpringThumb";
+import { RollingNumber } from "@/components/RollingNumber";
 import { Input } from "@/components/ui/input";
 import { Modal } from "@/components/ui/dialog";
 import { navigate, notify, request, useWorkspace } from "@/lib/api";
@@ -66,6 +68,8 @@ export function MySoftware() {
   const { snapshot, connected } = useWorkspace();
   const [tab, setTab] = useState<"software" | "feed">("software");
   const [filter, setFilter] = useState<Filter>("all");
+  const viewThumb = useSpringThumb(tab);
+  const filterThumb = useSpringThumb(filter);
   const [group, setGroup] = useState("");
   const [query, setQuery] = useState("");
   const [page, setPage] = useState(1);
@@ -315,20 +319,31 @@ export function MySoftware() {
         <h1>
           我的软件
           {projects.length > 0 && (
-            <span className="count-label">{projects.length}</span>
+            <span className="count-label">
+              <RollingNumber value={projects.length} />
+            </span>
           )}
         </h1>
         <div className="header-actions">
           <div className="header-stats" aria-label="软件概况">
             <span className={updates ? "is-accent" : ""}>
-              <strong>{updates}</strong>个可更新
+              <strong>
+                <RollingNumber value={updates} />
+              </strong>
+              个可更新
             </span>
             <span>
-              <strong>{snapshot?.favorites.length ?? 0}</strong>个已关注
+              <strong>
+                <RollingNumber value={snapshot?.favorites.length ?? 0} />
+              </strong>
+              个已关注
             </span>
             {issues > 0 && (
               <span className="is-warning">
-                <strong>{issues}</strong>个文件异常
+                <strong>
+                  <RollingNumber value={issues} />
+                </strong>
+                个文件异常
               </span>
             )}
           </div>
@@ -337,7 +352,9 @@ export function MySoftware() {
             <Button disabled={busy || !connected} onClick={updateAll}>
               <ArrowDownToLine size={15} />
               <span className="collapsible-label">全部更新</span>
-              <span className="count-label">{updates}</span>
+              <span className="count-label">
+                <RollingNumber value={updates} />
+              </span>
             </Button>
           )}
           <Button
@@ -389,7 +406,13 @@ export function MySoftware() {
       )}
 
       <div className="sw-tabs-row">
-      <div className="sw-tabs" role="tablist" aria-label="我的软件视图">
+      <div
+        className="sw-tabs"
+        role="tablist"
+        aria-label="我的软件视图"
+        ref={viewThumb.root}
+      >
+        <span className="tab-thumb" ref={viewThumb.thumb} aria-hidden="true" />
         <button
           role="tab"
           aria-selected={tab === "software"}
@@ -405,7 +428,11 @@ export function MySoftware() {
           onClick={() => setTab("feed")}
         >
           更新动态
-          {unreadCount > 0 && <small>{unreadCount}</small>}
+          {unreadCount > 0 && (
+            <small>
+              <RollingNumber value={unreadCount} />
+            </small>
+          )}
         </button>
       </div>
       <button className="sw-schedule" onClick={() => navigate("settings")}>
@@ -423,7 +450,13 @@ export function MySoftware() {
         <div className={`workbench sw-workbench ${selected ? "has-inspector" : ""}`}>
           <div className="task-list-pane">
             <div className="list-toolbar">
-              <div className="tabs" role="tablist" aria-label="筛选软件">
+              <div
+                className="tabs"
+                role="tablist"
+                aria-label="筛选软件"
+                ref={filterThumb.root}
+              >
+                <span className="tab-thumb" ref={filterThumb.thumb} aria-hidden="true" />
                 {filters.map(([key, label]) => {
                   const count = projects.filter((project) =>
                     matches(project, key),
@@ -442,7 +475,9 @@ export function MySoftware() {
                     >
                       {label}
                       {key !== "all" && count > 0 && (
-                        <span className="tab-count">{count}</span>
+                        <span className="tab-count">
+                          <RollingNumber value={count} />
+                        </span>
                       )}
                     </button>
                   );
@@ -846,13 +881,11 @@ function SoftwareInspector({
               <FolderOpen size={14} />
               打开文件夹
             </Button>
-            <Button
+            <CopyButton
               disabled={busy || !local.path}
-              onClick={() => onRun(() => request("copy", { text: local.path }))}
-            >
-              <Copy size={14} />
-              复制路径
-            </Button>
+              text={local.path}
+              label="复制路径"
+            />
           </div>
         </section>
       )}

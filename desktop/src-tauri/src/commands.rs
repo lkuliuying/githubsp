@@ -91,6 +91,9 @@ pub enum Request {
     Reorder {
         id: String,
         direction: String,
+        /// direction 为 "to" 时，目标是等待队列中的第几位（从 0 开始，超出范围放到末尾）。
+        #[serde(default)]
+        index: Option<usize>,
     },
     Route {
         id: String,
@@ -189,24 +192,53 @@ fn action(input: &str) -> Result<Action, String> {
     }
 }
 
-pub fn reordered(snapshot: &Snapshot, id: &str, direction: &str) -> Result<Vec<String>, String> {
-    let mut ids: Vec<_> = snapshot
+pub fn reordered(
+    snapshot: &Snapshot,
+    id: &str,
+    direction: &str,
+    index: Option<usize>,
+) -> Result<Vec<String>, String> {
+    let mut queued: Vec<_> = snapshot
         .tasks
         .iter()
         .filter(|t| t.status == TaskStatus::Queued)
-        .map(|t| t.id.clone())
         .collect();
-    let index = ids
+    // 与核心调度一致：按排队序号、创建时间、id 排序。
+    queued.sort_by(|a, b| {
+        (a.details.queue_position, a.created_at, &a.id).cmp(&(
+            b.details.queue_position,
+            b.created_at,
+            &b.id,
+        ))
+    });
+    moved(
+        queued.into_iter().map(|t| t.id.clone()).collect(),
+        id,
+        direction,
+        index,
+    )
+}
+
+/// 在等待队列的 id 序列里移动一项：上移、下移、置顶，或拖动到指定位置。
+fn moved(
+    mut ids: Vec<String>,
+    id: &str,
+    direction: &str,
+    index: Option<usize>,
+) -> Result<Vec<String>, String> {
+    let from = ids
         .iter()
         .position(|v| v == id)
         .ok_or("任务已经不在等待队列")?;
-    let target = match direction {
-        "up" => index.saturating_sub(1),
-        "down" => (index + 1).min(ids.len() - 1),
-        "top" => 0,
+    let last = ids.len() - 1;
+    let target = match (direction, index) {
+        ("up", _) => from.saturating_sub(1),
+        ("down", _) => (from + 1).min(last),
+        ("top", _) => 0,
+        ("to", Some(index)) => index.min(last),
         _ => return Err("无效排序操作".into()),
     };
-    let id = ids.remove(index);
+    let id = ids.remove(from);
     ids.insert(target, id);
     Ok(ids)
 }
@@ -393,11 +425,15 @@ pub async fn dispatch(
                 manager.snapshot().await
             }
         }
-        Request::Reorder { id, direction } => {
+        Request::Reorder {
+            id,
+            direction,
+            index,
+        } => {
             let snapshot = manager.snapshot().await.map_err(|e| e.to_string())?;
             manager
                 .reorder(
-                    reordered(&snapshot, &id, &direction)?,
+                    reordered(&snapshot, &id, &direction, index)?,
                     snapshot.queue_revision,
                 )
                 .await
@@ -688,5 +724,37 @@ mod tests {
             json!({"type":"history","query":"","page":1,"status":"invalid"})
         )
         .is_err());
+    }
+
+    #[test]
+    fn queue_moves_support_drag_to_index_and_keep_old_directions() {
+        let ids = || ["a", "b", "c", "d"].map(String::from).to_vec();
+        assert_eq!(
+            moved(ids(), "a", "to", Some(2)).unwrap(),
+            ["b", "c", "a", "d"]
+        );
+        assert_eq!(
+            moved(ids(), "d", "to", Some(0)).unwrap(),
+            ["d", "a", "b", "c"]
+        );
+        assert_eq!(
+            moved(ids(), "b", "to", Some(99)).unwrap(),
+            ["a", "c", "d", "b"]
+        );
+        assert_eq!(moved(ids(), "c", "up", None).unwrap(), ["a", "c", "b", "d"]);
+        assert_eq!(moved(ids(), "d", "down", None).unwrap(), ids());
+        assert_eq!(
+            moved(ids(), "c", "top", None).unwrap(),
+            ["c", "a", "b", "d"]
+        );
+        assert!(moved(ids(), "c", "to", None).is_err());
+        assert!(moved(ids(), "x", "up", None).is_err());
+        let request: Request =
+            serde_json::from_value(json!({"type":"reorder","id":"a","direction":"to","index":3}))
+                .unwrap();
+        assert!(matches!(request, Request::Reorder { index: Some(3), .. }));
+        let request: Request =
+            serde_json::from_value(json!({"type":"reorder","id":"a","direction":"up"})).unwrap();
+        assert!(matches!(request, Request::Reorder { index: None, .. }));
     }
 }

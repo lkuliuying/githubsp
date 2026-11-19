@@ -385,3 +385,12 @@ export function limitMegabytes(kib: number) {
 export function formatLimit(kib: number) {
   return kib === 0 ? "不限速" : `${limitMegabytes(kib)} MB/s`;
 }
+
+/** 顶栏用的简短写法：1 MB/s 以下换成 KB/s，以上最多三位小数。单位与设置一致（十进制）。 */
+export function shortLimit(kib: number) {
+  if (kib === 0) return "不限速";
+  const mb = limitMegabytes(kib);
+  return mb >= 1
+    ? `${Number(mb.toFixed(3))} MB/s`
+    : `${Math.max(1, Math.round((kib * 1024) / 1000))} KB/s`;
+}

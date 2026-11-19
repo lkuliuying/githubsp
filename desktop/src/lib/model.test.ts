@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   bytes,
   formatLimit,
+  shortLimit,
   limitMegabytes,
   parseLimit,
   progress,
@@ -39,6 +40,11 @@ describe("前端与 Rust 核心的显示及限速契约", () => {
     expect(formatLimit(1024)).toBe("1.048576 MB/s");
     expect(formatLimit(1)).toBe("0.001024 MB/s");
     expect(formatLimit(0)).toBe("不限速");
+    expect(shortLimit(0)).toBe("不限速");
+    expect(shortLimit(48)).toBe("49 KB/s");
+    expect(shortLimit(1)).toBe("1 KB/s");
+    expect(shortLimit(1000)).toBe("1.024 MB/s");
+    expect(shortLimit(parseLimit("5", 0))).toBe("5 MB/s");
     for (const stored of [0, 1, 999, 1000, 1024, 1234567, 10000000])
       expect(parseLimit(String(limitMegabytes(stored)), stored)).toBe(stored);
   });
