@@ -63,8 +63,11 @@ async fn empty_and_explicit_targets_do_not_create_downloads_and_old_cache_has_no
 
 #[tokio::test]
 async fn manual_detection_keeps_download_progress_queue_pause_cancel_and_resume_working() {
-    let fixture = Fixture::new(Mode::Slow, 1024 * 1024).await;
+    let mut fixture = Fixture::new(Mode::Slow, 1024 * 1024).await;
     let gate = fixture.hold_probe("manual-gated.bin");
+    // 被闸门挡住的探测请求已在超时计时内，要等两个慢速下载跑完才放行。
+    // 3 秒的默认值在较慢的 CI 机器上会先超时，这里放宽，探测超时由专门的测试覆盖。
+    fixture.network.probe_timeout = Duration::from_secs(60);
     let root = tempfile::tempdir().unwrap();
     let manager = Manager::start(
         &root.path().join("queue.sqlite3"),

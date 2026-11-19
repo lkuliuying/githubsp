@@ -1058,8 +1058,9 @@ async fn segmented_download_pauses_resumes_and_assembles_identical_file() {
         *fixture.bytes
     );
     // 默认 4 段；续传请求从各段已下载的位置继续，而不是从每段开头重下。
-    let requests = fixture.requests.lock().unwrap();
-    let starts: Vec<u64> = requests[before..]
+    // 先复制出续传后的请求记录再释放锁，测试服务器处理请求时也要拿这把锁。
+    let resumed = fixture.requests.lock().unwrap()[before..].to_vec();
+    let starts: Vec<u64> = resumed
         .iter()
         .filter(|range| range.as_str() != "0-524287")
         .filter_map(|range| range.split('-').next()?.parse().ok())
