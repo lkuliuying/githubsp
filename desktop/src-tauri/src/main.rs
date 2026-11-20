@@ -176,13 +176,17 @@ fn run_with_startup(startup: platform::Startup) -> Result<(), Box<dyn std::error
             }
         })
         .build(tauri::generate_context!());
-    let app = match app {
+    let mut app = match app {
         Ok(app) => app,
         Err(error) => {
             let _ = tauri::async_runtime::block_on(service.shutdown());
             return Err(error.into());
         }
     };
+    // 程序不使用原始鼠标/键盘设备事件。默认情况下窗口获得焦点时会注册原始输入，
+    // 每次鼠标移动、滚轮都要在界面线程上处理一遍；高回报率鼠标下会占满界面线程，
+    // 使 WebView2 的滚轮输入被扣住、成批放出，表现为滚动时一顿一顿。
+    app.set_device_event_filter(tauri::DeviceEventFilter::Always);
     app.run(move |app, event| {
         if let tauri::RunEvent::ExitRequested { api, .. } = event {
             if !service.exit_ready.load(Ordering::Acquire) {
