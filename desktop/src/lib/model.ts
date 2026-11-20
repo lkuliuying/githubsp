@@ -212,6 +212,8 @@ export interface Release {
 }
 export interface CatalogPage {
   repository: string;
+  /** 仓库改名或迁移过时，用户输入的旧名称。 */
+  renamedFrom?: string | null;
   releases: Release[];
   page: number;
   hasMore: boolean;

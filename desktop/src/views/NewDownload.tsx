@@ -7,6 +7,7 @@ import {
   ArrowLeft,
   ArrowRight,
   AlertCircle,
+  Code2,
   ExternalLink,
   FolderOpen,
   GitBranch,
@@ -15,7 +16,7 @@ import {
   RefreshCw,
 } from "lucide-react";
 import { navigate, notify, request, useWorkspace } from "@/lib/api";
-import { detectSource } from "@/lib/source";
+import { detectSource, sourceArchiveUrl } from "@/lib/source";
 import { pasteSource } from "@/lib/pasteSource";
 import {
   bytes,
@@ -26,6 +27,7 @@ import {
   type BatchItem,
   type BatchPreview,
   type CatalogPage,
+  type Release,
   routeOptions,
   type Snapshot,
 } from "@/lib/model";
@@ -53,6 +55,42 @@ export function openRepository(repository: string, autoload = true) {
   );
   navigate("new");
 }
+/** 没有安装包、只有源代码时的说明与入口；源码包交给浏览器下载。 */
+function SourceOnly({
+  repository,
+  release,
+}: {
+  repository: string;
+  release?: Release;
+}) {
+  const { run } = useJob();
+  const open = (url: string) => run(() => request("openLink", { url }));
+  return (
+    <Empty
+      icon={<Code2 size={24} strokeWidth={1.5} />}
+      title={release ? "这个版本没有附件，只有源代码" : "这个项目没有发布安装包"}
+      description="作者只提供了源代码，通常需要按项目说明自己编译或运行，不是下载后双击就能用的软件。建议先看看项目主页的说明。"
+      action={
+        <div className="empty-actions">
+          <Button
+            variant="default"
+            onClick={() => open(sourceArchiveUrl(repository, release?.tag))}
+          >
+            <ExternalLink size={15} />
+            {release ? "用浏览器下载此版本源码" : "用浏览器下载源码 ZIP"}
+          </Button>
+          <Button
+            variant="ghost"
+            onClick={() => open(release?.url || `https://github.com/${repository}`)}
+          >
+            {release ? "打开版本页面" : "打开项目主页"}
+          </Button>
+        </div>
+      }
+    />
+  );
+}
+
 export function Markdown({ children }: { children: string }) {
   const { run } = useJob();
   return (
@@ -408,6 +446,11 @@ export function NewDownload() {
                   <strong title={catalog.repository}>
                     {catalog.repository}
                   </strong>
+                  {catalog.renamedFrom && (
+                    <small className="catalog-renamed">
+                      已从 {catalog.renamedFrom} 改名或迁移
+                    </small>
+                  )}
                 </div>
                 <div className="catalog-version">
                   <label className="sr-only" htmlFor="release-version">
@@ -467,6 +510,9 @@ export function NewDownload() {
                         </Markdown>
                       </div>
                     )}
+                    {!release.assets.length ? (
+                      <SourceOnly repository={catalog.repository} release={release} />
+                    ) : (<>
                     <div className="asset-preference-panel">
                       <AssetPreferenceFields value={preference} onChange={setPreference} disabled={busy} />
                       <div className="asset-preference-actions">
@@ -575,12 +621,10 @@ export function NewDownload() {
                           </label>
                         ))}
                     </div>
+                    </>)}
                   </>
                 ) : (
-                  <Empty
-                    title="这个仓库还没有发布版本"
-                    description="换一个仓库地址，或者直接粘贴附件链接。"
-                  />
+                  <SourceOnly repository={catalog.repository} />
                 )}
               </div>
             </section>

@@ -13,3 +13,14 @@ export function detectSource(source: string) {
   if (lines.length === 1) return { kind: "repository" as const, lines };
   return { kind: "mixed" as const, lines };
 }
+
+/**
+ * GitHub 自动生成的源码压缩包地址。不传版本号时取默认分支的最新代码。
+ * 版本号里可能有斜杠（如 release/1.0），按路径逐段编码。
+ */
+export function sourceArchiveUrl(repository: string, tag?: string) {
+  const ref = tag
+    ? `refs/tags/${tag.split("/").map(encodeURIComponent).join("/")}`
+    : "HEAD";
+  return `https://github.com/${repository}/archive/${ref}.zip`;
+}

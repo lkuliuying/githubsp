@@ -4386,3 +4386,17 @@ select {
     transform: none;
   }
 }
+
+/* 只有源代码时的两个入口按钮 */
+.empty-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 4px;
+}
+.catalog-renamed {
+  font-size: 12px;
+  color: var(--muted);
+  white-space: nowrap;
+}

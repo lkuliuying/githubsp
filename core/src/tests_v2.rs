@@ -863,3 +863,54 @@ fn software_projects_group_by_repository_and_pick_latest_download() {
     let changed = crate::software::projects(vec![task(Some("owner/repo"), "v2", 20, present)]);
     assert_eq!(changed[0].file_state, "changed_size");
 }
+
+#[tokio::test]
+async fn renamed_repository_is_followed_and_still_verified() {
+    // 旧名称 old/repo 的接口返回的都是新仓库 New/Name 的地址。
+    let fixture = ApiFixture::with_response(200, |request| {
+        let line = request.lines().next().unwrap_or_default();
+        if line.contains("/repos/old/repo ") {
+            return serde_json::json!({"full_name": "New/Name"});
+        }
+        let release = serde_json::json!({"id":10,"tag_name":"v2","name":"","prerelease":false,"draft":false,"html_url":"https://github.com/New/Name/releases/tag/v2","body":"","assets":[{"id":20,"name":"app.exe","size":1,"browser_download_url":"https://github.com/New/Name/releases/download/v2/app.exe","digest":null}]});
+        if line.contains("/releases?per_page=") {
+            serde_json::json!([release])
+        } else {
+            release
+        }
+    })
+    .await;
+    let catalog = crate::catalog::Catalog::new(fixture.network.clone());
+    let page = catalog
+        .browse("https://github.com/old/repo", 0, false)
+        .await
+        .unwrap();
+    assert_eq!(page.repository, "New/Name");
+    assert_eq!(page.renamed_from.as_deref(), Some("old/repo"));
+    assert_eq!(
+        page.releases[0].assets[0].url,
+        "https://github.com/new/name/releases/download/v2/app.exe"
+    );
+    let calls = fixture.calls.lock().unwrap().clone();
+    assert!(calls
+        .iter()
+        .any(|c| c.starts_with("GET /repos/New/Name/releases/latest")));
+
+    // 接口说名称没变，但数据仍指向别的仓库：照旧拒绝。
+    let same = ApiFixture::with_response(200, |request| {
+        if request.lines().next().unwrap_or_default().contains("/repos/test/repo ") {
+            return serde_json::json!({"full_name": "test/repo"});
+        }
+        serde_json::json!({"id":10,"tag_name":"v2","name":"","prerelease":false,"draft":false,"html_url":"https://github.com/other/repo/releases/tag/v2","body":"","assets":[]})
+    })
+    .await;
+    let catalog = crate::catalog::Catalog::new(same.network.clone());
+    assert_eq!(
+        catalog
+            .browse("https://github.com/test/repo", 0, false)
+            .await
+            .unwrap_err()
+            .message,
+        "官方版本页面地址不一致"
+    );
+}

@@ -46,6 +46,8 @@ pub struct CatalogPage {
     pub page: u32,
     pub has_more: bool,
     pub selected_url: Option<String>,
+    /// 仓库改名或迁移过时，用户输入的旧名称。
+    pub renamed_from: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -325,11 +327,73 @@ impl Catalog {
         }
         // 输入框里可能是整段简介、跳转链接或只写了 owner/repo，先规范成标准地址。
         let resource = parse_resource(&crate::paste::normalize_input(input))?;
+        if let Some(page) = self
+            .browse_resource(&resource, page, include_prerelease)
+            .await?
+        {
+            return Ok(page);
+        }
+        // 仓库改名或迁移后，接口会自动跳到新仓库，返回的地址都是新名称。
+        // 查出当前名称后按新名称重新读取一次，结果仍按新名称严格校验。
+        let old = resource.repository()?;
+        let (owner, repo) = old
+            .split_once('/')
+            .ok_or_else(|| DownloadError::new(ErrorKind::InvalidInput, "仓库地址无效"))?;
+        let moved = || DownloadError::new(ErrorKind::Protocol, "官方版本页面地址不一致");
+        let current = self.get(&["repos", owner, repo], &[]).await?;
+        let current = current
+            .get("full_name")
+            .and_then(|v| v.as_str())
+            .ok_or_else(moved)?
+            .to_string();
+        let current = parse_resource(&format!("https://github.com/{current}"))
+            .and_then(|r| r.repository())
+            .map_err(|_| moved())?;
+        if current.eq_ignore_ascii_case(&old) {
+            return Err(moved());
+        }
+        let renamed = match resource {
+            Resource::Repository(_) => Resource::Repository(current.clone()),
+            Resource::Release(_, tag) => Resource::Release(current.clone(), tag),
+            Resource::Latest(_, name) => Resource::Latest(current.clone(), name),
+            Resource::Asset(url) => {
+                let source = parse_release_url(&url)?;
+                let mut url = source.url.clone();
+                let (new_owner, new_repo) = current.split_once('/').ok_or_else(moved)?;
+                url.path_segments_mut()
+                    .map_err(|_| moved())?
+                    .clear()
+                    .extend([
+                        new_owner,
+                        new_repo,
+                        "releases",
+                        "download",
+                        &source.tag,
+                        &source.filename,
+                    ]);
+                Resource::Asset(url.to_string())
+            }
+        };
+        let mut page = self
+            .browse_resource(&renamed, page, include_prerelease)
+            .await?
+            .ok_or_else(moved)?;
+        page.renamed_from = Some(old);
+        Ok(page)
+    }
+
+    /// 读取一页版本。返回 `None` 表示官方数据都指向另一个仓库名（仓库已改名或迁移）。
+    async fn browse_resource(
+        &self,
+        resource: &Resource,
+        page: u32,
+        include_prerelease: bool,
+    ) -> Result<Option<CatalogPage>> {
         let repository = resource.repository()?;
         let (owner, repo) = repository
             .split_once('/')
             .ok_or_else(|| DownloadError::new(ErrorKind::InvalidInput, "仓库地址无效"))?;
-        let (value, list) = match &resource {
+        let (value, list) = match resource {
             Resource::Asset(url) => {
                 let source = parse_release_url(url)?;
                 (
@@ -401,7 +465,15 @@ impl Catalog {
             let mut assets = Vec::new();
             for asset in release.assets {
                 let parsed = crate::source::parse_asset_location(&asset.browser_download_url)?;
-                if !format!("{}/{}", parsed.owner, parsed.repo).eq_ignore_ascii_case(&repository)
+                let same_repository =
+                    format!("{}/{}", parsed.owner, parsed.repo).eq_ignore_ascii_case(&repository);
+                if !same_repository
+                    && parsed.tag == release.tag_name
+                    && parsed.filename == asset.name
+                {
+                    return Ok(None);
+                }
+                if !same_repository
                     || parsed.tag != release.tag_name
                     || parsed.filename != asset.name
                 {
@@ -421,6 +493,10 @@ impl Catalog {
                     url: parsed.url.to_string(),
                     sha256: digest(asset.digest),
                 });
+            }
+            if matches!(parse_resource(&release.html_url), Ok(Resource::Release(ref actual, ref tag)) if !actual.eq_ignore_ascii_case(&repository) && *tag == release.tag_name)
+            {
+                return Ok(None);
             }
             if !matches!(parse_resource(&release.html_url), Ok(Resource::Release(ref actual, ref tag)) if actual.eq_ignore_ascii_case(&repository) && *tag == release.tag_name)
             {
@@ -446,7 +522,7 @@ impl Catalog {
                 releases
                     .iter()
                     .flat_map(|r| &r.assets)
-                    .find(|asset| asset.name == name)
+                    .find(|asset| asset.name == *name)
                     .ok_or_else(|| {
                         DownloadError::new(
                             ErrorKind::NotFound,
@@ -459,13 +535,14 @@ impl Catalog {
         } else {
             None
         };
-        Ok(CatalogPage {
+        Ok(Some(CatalogPage {
             repository,
             releases,
             page,
             has_more,
             selected_url,
-        })
+            renamed_from: None,
+        }))
     }
 
     /// 官方 API 不可用时，从公开的 releases.atom 获取最新版本（无附件、无预发布过滤）。
