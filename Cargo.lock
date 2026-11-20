@@ -1410,7 +1410,7 @@ dependencies = [
 
 [[package]]
 name = "githubsp-core"
-version = "0.4.2"
+version = "0.4.3"
 dependencies = [
  "dunce",
  "futures-util",
@@ -1433,7 +1433,7 @@ dependencies = [
 
 [[package]]
 name = "githubsp-desktop"
-version = "0.4.2"
+version = "0.4.3"
 dependencies = [
  "githubsp-core",
  "rfd",
