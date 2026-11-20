@@ -48,6 +48,8 @@ import { useSpringThumb } from "@/lib/useSpringThumb";
 import { useDragSort } from "@/lib/useDragSort";
 import { SpeedLimitPopover } from "@/components/SpeedLimitPopover";
 import { RollingNumber } from "@/components/RollingNumber";
+import { useWideLayout } from "@/components/PageRail";
+import { QueueOverview } from "./RailPanels";
 
 type Filter = "unfinished" | "active" | "paused" | "failed" | "done";
 const resumable = (task: Task) =>
@@ -80,6 +82,8 @@ export function Queue() {
   const restoreTriggerFocus = useRef(false);
   const { busy, run } = useJob();
   const confirm = useConfirm();
+  const pageRef = useRef<HTMLElement>(null);
+  const wide = useWideLayout(pageRef);
 
   // ---- 已完成：分页读取历史 ----
   const [doneStatus, setDoneStatus] = useState<"completed" | "cancelled">(
@@ -310,6 +314,17 @@ export function Queue() {
     </span>
   );
 
+  const inspector = (task: Task) => (
+    <TaskInspector
+      task={task}
+      busy={busy}
+      closeRef={detailClose}
+      onClose={closeDetails}
+      onAct={act}
+      onRedownload={redownload}
+      run={run}
+    />
+  );
   const tabs: [Filter, string][] = [
     ["unfinished", "未完成"],
     ["active", "进行中"],
@@ -318,7 +333,11 @@ export function Queue() {
     ["done", "已完成"],
   ];
   return (
-    <section className="page queue-page" tabIndex={-1}>
+    <section
+      ref={pageRef}
+      className={`page queue-page ${wide ? "has-rail" : ""}`}
+      tabIndex={-1}
+    >
       <PageHeader>
         <div>
           <h1>
@@ -358,10 +377,12 @@ export function Queue() {
           </Button>
         </div>
       </PageHeader>
+      <div className="page-split">
+      <div className="page-main">
       <div className="queue-top">
         <QuickDownload />
       </div>
-      <div className={`workbench ${selected ? "has-inspector" : ""}`}>
+      <div className={`workbench ${selected && !wide ? "has-inspector" : ""}`}>
         <div className="task-list-pane">
           <div className="list-toolbar">
             <div
@@ -725,17 +746,22 @@ export function Queue() {
             />
           )}
         </div>
-        {selected && (
-          <TaskInspector
-            task={selected}
-            busy={busy}
-            closeRef={detailClose}
-            onClose={closeDetails}
-            onAct={act}
-            onRedownload={redownload}
-            run={run}
-          />
-        )}
+        {selected && !wide && inspector(selected)}
+      </div>
+      </div>
+      {wide && (
+        <aside className="page-rail" aria-label="下载概览">
+          {selected ? (
+            inspector(selected)
+          ) : (
+            <QueueOverview
+              visible={visible}
+              tasks={tasks}
+              onShowDone={() => changeFilter("done")}
+            />
+          )}
+        </aside>
+      )}
       </div>
     </section>
   );

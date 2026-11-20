@@ -1,4 +1,4 @@
-import { PageHeader, usePageActiveRef } from "@/components/PageActivity";
+import { PageHeader, usePageActive, usePageActiveRef } from "@/components/PageActivity";
 import { AssetPreferenceFields } from "@/components/AssetPreferenceFields";
 import { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
@@ -35,6 +35,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Modal } from "@/components/ui/dialog";
 import { Empty, useConfirm, useJob } from "@/components/common";
+import { useWideLayout } from "@/components/PageRail";
+import { NewDownloadRail } from "./RailPanels";
 
 const draft = {
   source: "",
@@ -170,6 +172,9 @@ export function NewDownload() {
   const browseEpoch = useRef(0);
   const { busy, run, active } = useJob();
   const confirm = useConfirm();
+  const pageRef = useRef<HTMLElement>(null);
+  const wide = useWideLayout(pageRef);
+  const pageVisible = usePageActive();
   useEffect(() => {
     const open = (event: Event) => {
       setSource((event as CustomEvent<string>).detail);
@@ -331,7 +336,11 @@ export function NewDownload() {
   const valid =
     preview?.items.filter((item) => item.status === "valid" && item.url) ?? [];
   return (
-    <section className="page new-page" tabIndex={-1}>
+    <section
+      ref={pageRef}
+      className={`page new-page ${wide ? "has-rail" : ""}`}
+      tabIndex={-1}
+    >
       <PageHeader>
         <div>
           <h1>新建下载</h1>
@@ -341,6 +350,8 @@ export function NewDownload() {
           返回队列
         </Button>
       </PageHeader>
+      <div className="page-split">
+      <div className="page-main">
       <div className="new-content">
         <div className="source-input">
           <label className="field-label" htmlFor="source-url">
@@ -734,6 +745,13 @@ export function NewDownload() {
           </Button>
         </div>
       </footer>
+      </div>
+      {wide && (
+        <aside className="page-rail" aria-label="快捷入口">
+          <NewDownloadRail visible={pageVisible} />
+        </aside>
+      )}
+      </div>
       <Modal
         open={!!preview}
         onClose={() => {

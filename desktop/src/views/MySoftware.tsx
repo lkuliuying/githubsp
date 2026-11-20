@@ -48,6 +48,8 @@ import {
 import { Markdown, openRepository } from "./NewDownload";
 import { UpdateFeed } from "./Updates";
 import { pasteSource } from "@/lib/pasteSource";
+import { useWideLayout } from "@/components/PageRail";
+import { downloadFavorite, SoftwareOverview } from "./RailPanels";
 
 const filters = [
   ["all", "全部"],
@@ -85,6 +87,8 @@ export function MySoftware() {
   const detailTrigger = useRef<HTMLButtonElement | null>(null);
   const { busy, run, active } = useJob();
   const confirm = useConfirm();
+  const pageRef = useRef<HTMLElement>(null);
+  const wide = useWideLayout(pageRef);
 
   useEffect(() => {
     if (!visible || !connected) return;
@@ -142,22 +146,7 @@ export function MySoftware() {
 
   // ---- 操作 ----
   const download = (project: SoftwareProject) =>
-    run(async () => {
-      try {
-        await request("favoriteDownload", { repository: project.repository });
-        notify(`${project.repository} 已加入下载队列`, "success");
-      } catch (reason) {
-        const message = reason instanceof Error ? reason.message : String(reason);
-        if (
-          await confirm(
-            "没能自动选出附件",
-            `${message}\n\n可以打开版本列表手动选择要下载的附件。`,
-            "手动选择",
-          )
-        )
-          openRepository(project.repository);
-      }
-    });
+    run(() => downloadFavorite(project.repository, confirm));
   // 依次把所有可更新的项目加入队列；选不出附件的项目汇总提示，不逐个弹窗。
   const updateAll = () =>
     run(async () => {
@@ -268,6 +257,18 @@ export function MySoftware() {
     return null;
   };
 
+  const inspector = (project: SoftwareProject) => (
+    <SoftwareInspector
+      project={project}
+      busy={busy}
+      primary={primary(project, true)}
+      onClose={closeDetails}
+      onOpenFolder={() => openFolder(project)}
+      onEdit={() => setEditing(project)}
+      onUnwatch={() => unwatch(project)}
+      onRun={run}
+    />
+  );
   const menuItems = (project: SoftwareProject) => [
     {
       label: "查看所有版本",
@@ -315,7 +316,11 @@ export function MySoftware() {
   ];
 
   return (
-    <section className="page sw-page" tabIndex={-1}>
+    <section
+      ref={pageRef}
+      className={`page sw-page ${wide ? "has-rail" : ""}`}
+      tabIndex={-1}
+    >
       <PageHeader>
         <h1>
           我的软件
@@ -385,6 +390,8 @@ export function MySoftware() {
         </div>
       </PageHeader>
 
+      <div className="page-split">
+      <div className="page-main">
       {snapshot?.checking.active && (
         <div className="checking-banner">
           <RefreshCw size={16} className="spin" />
@@ -448,7 +455,7 @@ export function MySoftware() {
           <UpdateFeed active={visible && tab === "feed"} />
         </div>
       ) : (
-        <div className={`workbench sw-workbench ${selected ? "has-inspector" : ""}`}>
+        <div className={`workbench sw-workbench ${selected && !wide ? "has-inspector" : ""}`}>
           <div className="task-list-pane">
             <div className="list-toolbar">
               <div
@@ -665,20 +672,31 @@ export function MySoftware() {
               />
             )}
           </div>
-          {selected && (
-            <SoftwareInspector
-              project={selected}
-              busy={busy}
-              primary={primary(selected, true)}
-              onClose={closeDetails}
-              onOpenFolder={() => openFolder(selected)}
-              onEdit={() => setEditing(selected)}
-              onUnwatch={() => unwatch(selected)}
-              onRun={run}
-            />
-          )}
+          {selected && !wide && inspector(selected)}
         </div>
       )}
+      </div>
+      {wide && (
+        <aside className="page-rail" aria-label="软件概览">
+          {selected && tab === "software" ? (
+            inspector(selected)
+          ) : (
+            <SoftwareOverview
+              projects={projects}
+              busy={busy}
+              visible={visible}
+              showRecent={tab === "software"}
+              onDownload={download}
+              onUpdateAll={updateAll}
+              onSelect={(project) => {
+                setTab("software");
+                select(project.key);
+              }}
+            />
+          )}
+        </aside>
+      )}
+      </div>
 
       <Modal
         open={adding}

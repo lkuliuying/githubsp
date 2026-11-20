@@ -4400,3 +4400,300 @@ select {
   color: var(--muted);
   white-space: nowrap;
 }
+
+/* ===== 宽屏右侧常驻栏（2026-11-20）=====
+   窄窗口时 .page-split / .page-main 不参与布局，页面保持原样；
+   页面宽度达到 RAIL_MIN_WIDTH 时变成「主区 + 右侧栏」两栏，详情面板也放进右侧栏。 */
+.page-split,
+.page-main {
+  display: contents;
+}
+.page.has-rail {
+  max-width: none;
+}
+.page.has-rail .page-split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) clamp(320px, 22vw, 400px);
+  gap: 16px;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.page.has-rail .page-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+:where(.sw-page .page-main) > * {
+  flex-shrink: 0;
+}
+.sw-workbench.has-inspector {
+  flex: 1 1 auto;
+}
+.page-rail {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+  /* 详情面板滑入时会短暂右移，横向不出滚动条。 */
+  overflow: hidden auto;
+  padding-bottom: 2px;
+  scrollbar-width: thin;
+  animation: panel-in var(--dur-base) var(--ease-out);
+}
+.page-rail > .inspector {
+  position: static;
+  flex: 0 1 auto;
+  min-height: 0;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 16px 18px 18px;
+}
+.rail-card {
+  flex-shrink: 0;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 14px 16px;
+}
+.rail-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.rail-card-head h2 {
+  font-size: 14px;
+  font-weight: 600;
+}
+.rail-card-head .pager-link {
+  font-size: 12px;
+}
+.rail-badge {
+  font-size: 12px;
+  padding: 1px 8px;
+  border-radius: 9px;
+  color: var(--info);
+  background: var(--info-soft);
+  white-space: nowrap;
+}
+.rail-stats {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+}
+.rail-stats > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.rail-stats > div + div {
+  padding-left: 14px;
+  border-left: 1px solid var(--border);
+}
+.rail-stats small,
+.rail-speed small {
+  font-size: 12px;
+  color: var(--muted);
+}
+.rail-stats strong {
+  font-size: 20px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.rail-speed {
+  margin-top: 14px;
+}
+.rail-speed-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 6px;
+}
+.rail-speed-head > span {
+  font-size: 13px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.rail-speed-head > span.is-live {
+  color: var(--progress);
+  font-weight: 500;
+}
+.sparkline {
+  display: block;
+  width: 100%;
+  height: 44px;
+  overflow: visible;
+}
+.sparkline-line {
+  fill: none;
+  stroke: var(--progress);
+  stroke-width: 1.5;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}
+.sparkline-area {
+  fill: var(--progress);
+  opacity: 0.08;
+}
+.rail-list {
+  display: flex;
+  flex-direction: column;
+  margin: 0 -4px;
+}
+.rail-list > li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 46px;
+  padding: 6px 4px;
+}
+.rail-list > li + li {
+  border-top: 1px solid var(--border);
+}
+.rail-item-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+.rail-name {
+  font-size: 13px;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rail-repo {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+}
+.rail-repo strong {
+  font-size: 13px;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rail-repo small {
+  font-size: 12px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex-shrink: 1;
+}
+.rail-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--muted);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.rail-meta-strong {
+  color: var(--ink);
+}
+.rail-icon {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  color: var(--muted);
+  background: var(--surface-muted);
+}
+.rail-link-button {
+  display: block;
+  max-width: 100%;
+  text-align: left;
+}
+.rail-link-button:hover .rail-repo strong {
+  color: var(--link);
+}
+.rail-row-button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: calc(100% + 8px);
+  margin: -6px -4px;
+  padding: 6px 4px;
+  border-radius: 8px;
+  text-align: left;
+}
+.rail-row-button:hover {
+  background: var(--surface-hover);
+}
+.rail-row-arrow {
+  flex-shrink: 0;
+  color: var(--muted);
+  opacity: 0;
+  transition: opacity var(--dur-fast, 0.12s);
+}
+.rail-row-button:hover .rail-row-arrow,
+.rail-row-button:focus-visible .rail-row-arrow {
+  opacity: 1;
+}
+.rail-card-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 8px;
+  font-size: 12px;
+}
+.rail-note {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--muted);
+}
+.rail-note p {
+  color: var(--ink);
+}
+.rail-note small {
+  font-size: 12px;
+}
+.rail-help {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.rail-help > li {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+}
+.rail-help > li > svg {
+  flex-shrink: 0;
+  margin-top: 3px;
+  color: var(--muted);
+}
+.rail-help div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.rail-help strong {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ink);
+}
+.rail-help code {
+  font-family: inherit;
+  font-size: 12px;
+}
+.rail-tip {
+  font-size: 12px;
+  color: var(--muted);
+  padding: 0 4px;
+}
