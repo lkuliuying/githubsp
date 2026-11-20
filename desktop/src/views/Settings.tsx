@@ -1118,7 +1118,7 @@ export function Settings() {
                 <SettingsGroup title="应用">
                   <Preference
                     title="GitHubSP"
-                    description={`版本 ${info?.version ?? "0.4.3"}`}
+                    description={`版本 ${info?.version ?? "0.5.0"}`}
                     keywords="检查应用更新 版本"
                   >
                     <img
