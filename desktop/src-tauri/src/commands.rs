@@ -168,6 +168,10 @@ pub enum Request {
         #[serde(default)]
         manual: bool,
     },
+    /// 识别用户粘贴进输入框的文字，返回规范后的 GitHub 来源。
+    Recognize {
+        text: String,
+    },
     Diagnostics,
     ExportBackup,
     InspectMigration {
@@ -671,6 +675,12 @@ pub async fn dispatch(
             .await
             .map_err(|e| e.to_string())?;
             return value(json!({ "sequence": sequence, "suggestion": suggestion }));
+        }
+        Request::Recognize { text } => {
+            if text.len() > 1_048_576 {
+                return value(Value::Null);
+            }
+            return value(paste::recognize_input(&text));
         }
         Request::Diagnostics => {
             let snapshot = manager.snapshot().await.map_err(|e| e.to_string())?;

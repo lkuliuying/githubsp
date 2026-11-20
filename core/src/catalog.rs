@@ -323,7 +323,8 @@ impl Catalog {
                 "版本页码超出范围",
             ));
         }
-        let resource = parse_resource(input)?;
+        // 输入框里可能是整段简介、跳转链接或只写了 owner/repo，先规范成标准地址。
+        let resource = parse_resource(&crate::paste::normalize_input(input))?;
         let repository = resource.repository()?;
         let (owner, repo) = repository
             .split_once('/')

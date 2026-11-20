@@ -163,6 +163,7 @@ impl Library {
     }
 
     pub async fn add(&self, input: String) -> Result<Snapshot> {
+        let input = crate::paste::normalize_input(&input);
         let repository = crate::source::parse_resource(&input)?.repository()?;
         self.manager.add_favorite(input).await?;
         self.run(Some(vec![repository]), true).await

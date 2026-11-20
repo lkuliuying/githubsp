@@ -39,6 +39,7 @@ import { Input } from "@/components/ui/input";
 import { Menu } from "@/components/Menu";
 import { Pager, clampPage, usePageSize } from "@/components/Pager";
 import { detectSource } from "@/lib/source";
+import { pasteSource } from "@/lib/pasteSource";
 import { openRepository } from "./NewDownload";
 import { Empty, ErrorBox, useConfirm, useJob } from "@/components/common";
 import { TaskProgress } from "@/components/TaskProgress";
@@ -794,6 +795,7 @@ function QuickDownload() {
         disabled={busy}
         spellCheck={false}
         onChange={(event) => setText(event.target.value)}
+        onPaste={(event) => pasteSource(event, setText)}
         onKeyDown={(event) => {
           if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
             event.preventDefault();

@@ -47,6 +47,7 @@ import {
 } from "@/lib/software";
 import { Markdown, openRepository } from "./NewDownload";
 import { UpdateFeed } from "./Updates";
+import { pasteSource } from "@/lib/pasteSource";
 
 const filters = [
   ["all", "全部"],
@@ -717,6 +718,7 @@ export function MySoftware() {
           value={input}
           disabled={busy}
           onChange={(event) => setInput(event.target.value)}
+          onPaste={(event) => pasteSource(event, setInput)}
           onKeyDown={(event) => {
             if (event.key === "Enter" && !event.nativeEvent.isComposing && input.trim())
               run(async () => {

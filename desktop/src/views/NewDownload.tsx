@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { navigate, notify, request, useWorkspace } from "@/lib/api";
 import { detectSource } from "@/lib/source";
+import { pasteSource } from "@/lib/pasteSource";
 import {
   bytes,
   date,
@@ -320,6 +321,7 @@ export function NewDownload() {
               disabled={busy}
               spellCheck={false}
               onChange={(e) => changeSource(e.target.value)}
+              onPaste={(e) => pasteSource(e, changeSource)}
               onKeyDown={(e) => {
                 // 仓库地址按回车直接读取版本；附件链接仍可换行继续粘贴。
                 if (
